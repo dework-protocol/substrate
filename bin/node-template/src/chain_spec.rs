@@ -1,6 +1,6 @@
 use sp_core::{Pair, Public, sr25519};
 use node_template_runtime::{
-	AccountId, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig,
+	AccountId, AuraConfig, BalancesConfig, GenesisConfig, GrandpaConfig,SkillExchangeConfig,
 	SudoConfig, IndicesConfig, SystemConfig, WASM_BINARY, Signature
 };
 use sp_consensus_aura::sr25519::{AuthorityId as AuraId};
@@ -138,6 +138,12 @@ fn testnet_genesis(initial_authorities: Vec<(AuraId, GrandpaId)>,
 		}),
 		grandpa: Some(GrandpaConfig {
 			authorities: initial_authorities.iter().map(|x| (x.1.clone(), 1)).collect(),
+		}),
+		se: Some(SkillExchangeConfig {
+			subjects: vec![(1, get_account_id_from_seed::<sr25519::Public>("Alice")), (2, get_account_id_from_seed::<sr25519::Public>("Bob"))],
+			subject_count: 3,
+			rep: vec![(get_account_id_from_seed::<sr25519::Public>("Alice"), 50)],
+			cred_manager: get_account_id_from_seed::<sr25519::Public>("Alice"),
 		}),
 	}
 }
