@@ -124,14 +124,14 @@ decl_module! {
 
             let sender = ensure_signed(origin)?;
             let subject_issuer = Self::subjects(subject);
-            ensure!(sender == <CredManager<T>>::get(), "Unauthorized.");
+            //ensure!(sender == <CredManager<T>>::get(), "Unauthorized.");
             ensure!(subject_issuer == sender, "Unauthorized.");
 
-            ensure!(<Credentials<T>>::exists((to.clone(), 1)), "Credential already issued to user.");
+            //ensure!(<Credentials<T>>::exists((to.clone(), subject)), "Credential already issued to user.");
 
             let now = <timestamp::Module<T>>::get();
             let cred = Credential {
-              subject: 1,
+              subject: subject,
               when: now,
               by: sender.clone()
             };
@@ -179,9 +179,9 @@ decl_module! {
         }
 
         /// Create a new subject.
-        pub fn create_subject(origin, ) {
+        pub fn create_subject(origin) {
             let sender = ensure_signed(origin)?;
-            ensure!(sender == <CredManager<T>>::get(), "Unauthorized.");
+            //ensure!(sender == <CredManager<T>>::get(), "Unauthorized.");
             let subject_count = <SubjectCount>::get();
 
             //ensure!(subject_count < MAX_SUBJECT, "Max issuance count reached");
@@ -203,10 +203,11 @@ impl<T: Trait> Module<T> {
 
     pub fn do_publish_task(origin: T::Origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance) -> DispatchResult {
         let sender = ensure_signed(origin)?;
-        let nonce = <Nonce>::get();
+        let _nonce = <Nonce>::get();
 
 //        let hash = (<system::Module<T>>::random_seed(), sender.clone(), nonce)
 //            .using_encoded(<T as system::Trait>::Hashing::hash);
+		//TODO:
 		let hash = sender.clone().using_encoded(<T as system::Trait>::Hashing::hash);
 
         frame_support::print(hash.encode().as_slice());

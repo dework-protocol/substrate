@@ -36,6 +36,8 @@ pub use frame_support::{
 	traits::Randomness,
 	weights::Weight,
 };
+//pub use identity::Gas as ContractsGas;
+
 
 /// An index to a block.
 pub type BlockNumber = u32;

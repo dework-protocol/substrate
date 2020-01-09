@@ -14,6 +14,8 @@ randomness-collective-flip = { version = "2.0.0", default-features = false, pack
 sudo = { version = "2.0.0", default-features = false, package = "pallet-sudo", path = "../../../frame/sudo" }
 system = { version = "2.0.0", default-features = false, package = "frame-system", path = "../../../frame/system" }
 timestamp = { version = "2.0.0", default-features = false, package = "pallet-timestamp", path = "../../../frame/timestamp" }
+identity = { version = "2.0.0", default-features = false, package = "pallet-identity", path = "../../../frame/identity" }
+
 transaction-payment = { version = "2.0.0", default-features = false, package = "pallet-transaction-payment", path = "../../../frame/transaction-payment" }
 
 codec = { package = "parity-scale-codec", version = "1.0.0", default-features = false, features = ["derive"] }
@@ -64,5 +66,6 @@ std = [
 	"sudo/std",
 	"system/std",
 	"timestamp/std",
+	"identity/std",
 	"transaction-payment/std",
 ]
