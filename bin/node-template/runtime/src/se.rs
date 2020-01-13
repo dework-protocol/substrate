@@ -6,6 +6,8 @@ use sp_std::prelude::*;
 use codec::{Decode, Encode};
 use core::u32::MAX as MAX_SUBJECT;
 use sp_runtime::traits::{Hash};
+use log::{info};
+
 //use runtime_primitives::traits::{Hash};
 //use nicks;
 
@@ -30,11 +32,49 @@ pub struct Credential<Timestamp, AccountId> {
 pub struct Task<Hash, AccountId, Timestamp, Balance> {
     pub hash: Hash,
     pub issuer: AccountId,
-    pub description: Vec<u8>,
-    pub when: Timestamp,
+	//pub receivers: Vec<AccountId>,
+	pub description: Vec<u8>,
+	// done condition / overdue treatment
+	//pub judge: Vec<u8>,
+	pub when: Timestamp,
     pub pay: Balance,
     pub min_rep: u32,
-    pub status: u32, /* 0: published, 1: claimed*/
+    //pub status: TaskStatus<Timestamp>, /* 0: published, 1: claimed*/
+	pub status: u32, /* 0: published, 1: claimed*/
+	pub req_subjects: Vec<u32>,
+
+	//pub kind: TaskKind<Timestamp>,
+	//pub history: Vec<TaskKind<Timestamp>>,
+}
+
+#[cfg_attr(feature = "std", derive(Debug))]
+#[derive(Encode, Decode, Default, Clone, PartialEq)]
+pub struct Order<Hash, AccountId> {
+	hash: Hash,
+	task_hash: Hash,
+	claimer: AccountId,
+	status: u32,
+}
+
+#[derive(Encode, Decode, Clone, PartialEq)]
+#[cfg_attr(feature = "std", derive(Debug))]
+enum TaskStatus<Timestamp> {
+	Published(Timestamp),
+	InDelivery(Timestamp, Timestamp),
+	Arbitration(Timestamp),
+	// final
+	Overdue,
+	// final
+	Done(Timestamp),
+}
+
+#[derive(Encode, Decode, Clone, PartialEq)]
+#[cfg_attr(feature = "std", derive(Debug))]
+pub enum OrderStatus {
+	WaitReq,
+	InProcess,
+	Arbitration,
+	Final,
 }
 
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
@@ -72,8 +112,9 @@ decl_storage! {
         Reputation get(rep) config(): map T::AccountId => u32;
         //Task store.
         //Mapping issuer to task.
-        Tasks get(tasks): map T::Hash => Task<T::Hash, T::AccountId, T::Moment, T::Balance>;
-
+        Tasks get(tasks): map u64 => Task<T::Hash, T::AccountId, T::Moment, T::Balance>;
+		TaskCount get(task_count) : u64;
+		TaskIndex: map T::Hash => u64;
         //NewSubjectCount get(new_subject_count) config(): u32;
         // Issuers can issue credentials to others.
         // Issuer to Subject mapping.
@@ -87,6 +128,13 @@ decl_storage! {
 
         //credential manager
         CredManager get(cred_manager) config(): T::AccountId;
+
+        //Order map.
+        Orders get(orders): map u64 => Order<T::Hash, T::AccountId>;
+        OrderCount get(order_count) : u64;
+        OrderIndex: map T::Hash => u64;
+
+
 
     }
     //extra_genesis_skip_phantom_data_field;
@@ -142,8 +190,8 @@ decl_module! {
         }
 
         /// Publish a task.
-        pub fn publish_task(origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance) -> DispatchResult {
-          Self::do_publish_task(origin, _description, min_rep, pay)
+        pub fn publish_task(origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
+          Self::do_publish_task(origin, _description, min_rep, pay, req_subjects)
         }
 
         /// Claim a task.
@@ -201,17 +249,11 @@ decl_module! {
 
 impl<T: Trait> Module<T> {
 
-    pub fn do_publish_task(origin: T::Origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance) -> DispatchResult {
-        let sender = ensure_signed(origin)?;
-        let _nonce = <Nonce>::get();
-
-//        let hash = (<system::Module<T>>::random_seed(), sender.clone(), nonce)
-//            .using_encoded(<T as system::Trait>::Hashing::hash);
-		//TODO:
-		let hash = sender.clone().using_encoded(<T as system::Trait>::Hashing::hash);
-
-        frame_support::print(hash.encode().as_slice());
-
+    pub fn do_publish_task(origin: T::Origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
+        //generate task.
+		let sender = ensure_signed(origin)?;
+        let nonce = <Nonce>::get();
+		let hash = (sender.clone(), nonce).using_encoded(<T as system::Trait>::Hashing::hash);
         let now = <timestamp::Module<T>>::get();
 
         let task = Task {
@@ -222,29 +264,71 @@ impl<T: Trait> Module<T> {
             when: now,
             min_rep: min_rep,
             status: 0,
+			req_subjects: req_subjects,
         };
 
-        <Tasks<T>>::insert(hash, task.clone());
-        //let t = <Tasks<T>>::get(hash.clone()).hash;
-        //frame_support::print(t.encode().as_slice());
+		let task_count = <TaskCount>::get();
+        <Tasks<T>>::insert(task_count, task.clone());
+		<TaskIndex<T>>::insert(hash, task_count);
+		task_count.checked_add(1).ok_or("error to add task")?;
+		<TaskCount>::put(task_count+1);
 
-        Self::deposit_event(RawEvent::TaskPublished(sender));
+		info!("{:?}", hash);
+		<Nonce>::mutate(|n| *n += 1);
+
+		Self::deposit_event(RawEvent::TaskPublished(sender));
         Ok(())
   }
 
     pub fn do_claim_task(origin: T::Origin, hash: T::Hash) -> DispatchResult {
         let sender = ensure_signed(origin)?;
-        ensure!(<Tasks<T>>::exists(hash.clone()), "no task found according to the given hash.");
-        let mut task = <Tasks<T>>::get(hash.clone());
-        ensure!(task.status == 0, "task not waiting for claim.");
-        let min_rep = task.min_rep;
-        ensure!(<Reputation<T>>::exists(sender.clone()), "no valid user reputation.");
-        let rep = <Reputation<T>>::get(sender.clone());
-        ensure!(rep >= min_rep, "reputation not matched.");
-        task.status = 1;
-        <Tasks<T>>::insert(hash, task.clone());
-        Self::deposit_event(RawEvent::TaskClaimed(sender, hash));
 
+		//check task qualification.
+		let task_index = <TaskIndex<T>>::get(hash);
+        ensure!(<Tasks<T>>::exists(task_index.clone()), "no task found according to the given hash.");
+
+		let mut task = <Tasks<T>>::get(task_index);
+        ensure!(task.status == 0, "task not waiting for claim.");
+		let req_subjects = &task.req_subjects;
+		for sub in req_subjects {
+			ensure!(<Credentials<T>>::exists((sender.clone(), sub)), "subject not qualified.");
+		}
+
+        //ensure!(<Reputation<T>>::exists(sender.clone()), "no valid user reputation.");
+
+		let min_rep = task.min_rep;
+		let rep = <Reputation<T>>::get(sender.clone());
+        ensure!(rep >= min_rep, "reputation not matched.");
+
+
+
+		//modify task status.
+        task.status = 1;
+		<Tasks<T>>::insert(task_index, task.clone());
+
+		// generate order.
+		let nonce = <Nonce>::get();
+		let order_hash = (/*<system::Module<T>>::random_seed(),*/ sender.clone(), nonce)
+			.using_encoded(<T as system::Trait>::Hashing::hash);
+
+		let order = Order {
+			hash: order_hash,
+			task_hash: hash,
+			claimer: sender.clone(),
+			status: 1,
+		};
+		let order_count = <OrderCount>::get();
+
+		<Orders<T>>::insert(order_count, order.clone());
+		<OrderIndex<T>>::insert(order_hash, order_count);
+
+		order_count.checked_add(1).ok_or("error to add order")?;
+		<OrderCount>::put(order_count+1);
+
+		info!("{:?}", order_hash);
+
+		<Nonce>::mutate(|n| *n += 1);
+		Self::deposit_event(RawEvent::TaskClaimed(sender, hash));
 
         Ok(())
     }
