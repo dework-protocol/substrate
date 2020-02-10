@@ -7,9 +7,10 @@ use codec::{Decode, Encode};
 use core::u32::MAX as MAX_SUBJECT;
 use sp_runtime::traits::{Hash};
 use log::{info};
-
+//use sp_std::prelude::*;
 //use runtime_primitives::traits::{Hash};
 //use nicks;
+use identity;
 
 
 pub trait Trait: system::Trait + timestamp::Trait +  balances::Trait /*+ nicks::Trait*/{
@@ -77,21 +78,63 @@ pub enum OrderStatus {
 	Final,
 }
 
+//#[derive(Encode, Decode, Default, Clone, PartialEq)]
+//#[cfg_attr(feature = "std", derive(Debug))]
+//pub struct IdentityInfo {
+//	/// Additional fields of the identity that are not catered for with the struct's explicit
+//	/// fields.
+//	pub additional: Vec<u8>,
+//
+//	/// A reasonable display name for the controller of the account. This should be whatever it is
+//	/// that it is typically known as and should not be confusable with other entities, given
+//	/// reasonable context.
+//	///
+//	/// Stored as UTF-8.
+//	pub display: Vec<u8>,
+//
+//	/// The full legal name in the local jurisdiction of the entity. This might be a bit
+//	/// long-winded.
+//	///
+//	/// Stored as UTF-8.
+//	pub legal: Vec<u8>,
+//
+//	/// A representative website held by the controller of the account.
+//	///
+//	/// NOTE: `https://` is automatically prepended.
+//	///
+//	/// Stored as UTF-8.
+//	pub web: Vec<u8>,
+//
+//	/// The Riot/Matrix handle held by the controller of the account.
+//	///
+//	/// Stored as UTF-8.
+//	pub riot: Vec<u8>,
+//
+//	/// The email address of the controller of the account.
+//	///
+//	/// Stored as UTF-8.
+//	pub email: Vec<u8>,
+//
+//	/// The PGP/GPG public key of the controller of the account.
+//	///pub pgp_fingerprint: Option<[u8; 20]>,
+//
+//	/// A graphic image representing the controller of the account. Should be a company,
+//	/// organization or project logo or a headshot in the case of a human.
+//	pub image: Vec<u8>,
+
+//	/// The Twitter identity. The leading `@` character may be elided.
+//	pub email: Vec<u8>,
+//}
+
+
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "std", derive(Debug))]
-pub struct UserInfo<> {
-
-    pub rep: u32,
-}
-
-
-#[derive(Encode, Decode, Default, Clone, PartialEq)]
-#[cfg_attr(feature = "std", derive(Debug))]
-pub struct IdSubjectDetails<AccountId> {
-    pub issuer: AccountId,
+pub struct IdentityInfo {
+    //pub issuer: AccountId,
     pub name: Vec<u8>,
-    pub tags: Vec<u8>,
-    pub description: Vec<u8>,
+	pub email: Vec<u8>,
+	pub description: Vec<u8>,
+	pub additional: Vec<u8>,
 }
 
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
@@ -106,36 +149,43 @@ pub struct SkillSubjectDetails<AccountId> {
 
 decl_storage! {
     trait Store for Module<T: Trait> as SkillExchange {
+
+    	//// Part 1. ID
+
         // Global nonce for subject count.
         SubjectCount get(subject_count) config(): u32;
-        //Reputation: default is 50.
-        Reputation get(rep) config(): map T::AccountId => u32;
-        //Task store.
-        //Mapping issuer to task.
-        Tasks get(tasks): map u64 => Task<T::Hash, T::AccountId, T::Moment, T::Balance>;
-		TaskCount get(task_count) : u64;
-		TaskIndex: map T::Hash => u64;
-        //NewSubjectCount get(new_subject_count) config(): u32;
-        // Issuers can issue credentials to others.
+		// Issuers can issue credentials to others.
         // Issuer to Subject mapping.
-        //Subjects get(subjects) config(): map u32 => T::AccountId;
         Subjects get(subjects) config(): map u32 => T::AccountId;
 
         // Credentials store.
         // Mapping (holder, subject) to Credential.
         Credentials get(credentials): map (T::AccountId, u32) => Credential<T::Moment, T::AccountId>;
-        Nonce: u64;
-
         //credential manager
         CredManager get(cred_manager) config(): T::AccountId;
+
+        //Reputation: default is 50.
+        Reputation get(rep) config(): map T::AccountId => u32;
+
+        //User map.
+        Identities get(identities): map u64 => IdentityInfo;
+        IdentityCount get(identity_count) : u64;
+        IdentityIndex: map T::AccountId => u64;
+
+        //// Part 2. Task
+
+        //Task store.
+        //Mapping issuer to task.
+        Tasks get(tasks): map u64 => Task<T::Hash, T::AccountId, T::Moment, T::Balance>;
+		TaskCount get(task_count) : u64;
+		TaskIndex: map T::Hash => u64;
 
         //Order map.
         Orders get(orders): map u64 => Order<T::Hash, T::AccountId>;
         OrderCount get(order_count) : u64;
         OrderIndex: map T::Hash => u64;
 
-
-
+        Nonce: u64;
     }
     //extra_genesis_skip_phantom_data_field;
 }
@@ -157,6 +207,8 @@ decl_event!(
         TaskPublished(AccountId),
         //A new task is claimed.
         TaskClaimed(AccountId, Hash),
+        //A new identity is created.
+        IdentityCreated(AccountId),
     }
 );
 
@@ -184,9 +236,9 @@ decl_module! {
               by: sender.clone()
             };
 
-            <Credentials<T>>::insert((to.clone(), 1), cred);
+            <Credentials<T>>::insert((to.clone(), subject), cred);
 
-            Self::deposit_event(RawEvent::CredentialIssued(to, 1, sender));
+            Self::deposit_event(RawEvent::CredentialIssued(to, subject, sender));
         }
 
         /// Publish a task.
@@ -243,6 +295,30 @@ decl_module! {
             // Deposit the event.
             Self::deposit_event(RawEvent::SubjectCreated(sender, subject_count));
         }
+
+        ///update_reputation
+        pub fn update_reputation(origin, who: T::AccountId, rep_value: u32) {
+            let sender = ensure_signed(origin)?;
+        	<Reputation<T>>::insert(who, rep_value);
+        }
+
+        ///register User
+        pub fn register_user(origin, name: Vec<u8>, email: Vec<u8>, description: Vec<u8>, additional: Vec<u8>) {
+        	let sender = ensure_signed(origin)?;
+        	let info = IdentityInfo {
+        	    name: name,
+        		email: email,
+        		description: description,
+        		additional: additional,
+        	};
+        	let identity_count = <IdentityCount>::get();
+        	<Identities>::insert(identity_count, info.clone());
+			<IdentityIndex<T>>::insert(sender.clone(), identity_count);
+			identity_count.checked_add(1).ok_or("error to add task")?;
+			<IdentityCount>::put(identity_count+1);
+			Self::deposit_event(RawEvent::IdentityCreated(sender.clone()));
+		}
+
     }
 }
 
@@ -267,13 +343,14 @@ impl<T: Trait> Module<T> {
 			req_subjects: req_subjects,
         };
 
+		ensure!(!(<TaskIndex<T>>::exists(hash.clone())), "duplicated task hash.");
+
 		let task_count = <TaskCount>::get();
         <Tasks<T>>::insert(task_count, task.clone());
 		<TaskIndex<T>>::insert(hash, task_count);
 		task_count.checked_add(1).ok_or("error to add task")?;
 		<TaskCount>::put(task_count+1);
 
-		info!("{:?}", hash);
 		<Nonce>::mutate(|n| *n += 1);
 
 		Self::deposit_event(RawEvent::TaskPublished(sender));
