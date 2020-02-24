@@ -2,40 +2,40 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 // `construct_runtime!` does a lot of recursion and requires us to increase the limit to 256.
-#![recursion_limit="256"]
+#![recursion_limit = "256"]
+
+pub use balances::Call as BalancesCall;
+pub use frame_support::{
+	construct_runtime, parameter_types, StorageValue,
+	traits::Randomness,
+	weights::Weight,
+};
+use grandpa::AuthorityList as GrandpaAuthorityList;
+use grandpa::fg_primitives;
+use sp_api::impl_runtime_apis;
+use sp_consensus_aura::sr25519::AuthorityId as AuraId;
+use sp_core::OpaqueMetadata;
+use sp_runtime::{
+	ApplyExtrinsicResult, create_runtime_str, generic, impl_opaque_keys,
+	MultiSignature, transaction_validity::TransactionValidity,
+};
+pub use sp_runtime::{Perbill, Permill};
+// A few exports that help ease life for downstream crates.
+#[cfg(any(feature = "std", test))]
+pub use sp_runtime::BuildStorage;
+use sp_runtime::traits::{
+	BlakeTwo256, Block as BlockT, ConvertInto, IdentifyAccount, NumberFor, StaticLookup, Verify,
+};
+use sp_std::prelude::*;
+#[cfg(feature = "std")]
+use sp_version::NativeVersion;
+use sp_version::RuntimeVersion;
+pub use timestamp::Call as TimestampCall;
 
 // Make the WASM binary available.
 #[cfg(feature = "std")]
 include!(concat!(env!("OUT_DIR"), "/wasm_binary.rs"));
 
-use sp_std::prelude::*;
-use sp_core::OpaqueMetadata;
-use sp_runtime::{
-	ApplyExtrinsicResult, transaction_validity::TransactionValidity, generic, create_runtime_str,
-	impl_opaque_keys, MultiSignature
-};
-use sp_runtime::traits::{
-	NumberFor, BlakeTwo256, Block as BlockT, StaticLookup, Verify, ConvertInto, IdentifyAccount
-};
-use sp_api::impl_runtime_apis;
-use sp_consensus_aura::sr25519::AuthorityId as AuraId;
-use grandpa::AuthorityList as GrandpaAuthorityList;
-use grandpa::fg_primitives;
-use sp_version::RuntimeVersion;
-#[cfg(feature = "std")]
-use sp_version::NativeVersion;
-
-// A few exports that help ease life for downstream crates.
-#[cfg(any(feature = "std", test))]
-pub use sp_runtime::BuildStorage;
-pub use timestamp::Call as TimestampCall;
-pub use balances::Call as BalancesCall;
-pub use sp_runtime::{Permill, Perbill};
-pub use frame_support::{
-	StorageValue, construct_runtime, parameter_types,
-	traits::Randomness,
-	weights::Weight,
-};
 //pub use identity::Gas as ContractsGas;
 
 
@@ -68,16 +68,19 @@ pub type DigestItem = generic::DigestItem<Hash>;
 /// Used for the module template in `./template.rs`
 mod template;
 mod se;
-mod types;
+mod task_board;
+//mod types;
+//mod task_board;
+//mod board;
 
 /// Opaque types. These are used by the CLI to instantiate machinery that don't need to know
 /// the specifics of the runtime. They can then be made to be agnostic over specific formats
 /// of data like extrinsics, allowing for them to continue syncing the network through upgrades
 /// to even the core datastructures.
 pub mod opaque {
-	use super::*;
-
 	pub use sp_runtime::OpaqueExtrinsic as UncheckedExtrinsic;
+
+	use super::*;
 
 	/// Opaque block header type.
 	pub type Header = generic::Header<BlockNumber, BlakeTwo256>;
@@ -250,6 +253,10 @@ impl se::Trait for Runtime {
 	type Event = Event;
 }
 
+impl task_board::Trait for Runtime {
+	type Event = Event;
+}
+
 construct_runtime!(
 	pub enum Runtime where
 		Block = Block,
@@ -268,7 +275,7 @@ construct_runtime!(
 		TemplateModule: template::{Module, Call, Storage, Event<T>},
 		RandomnessCollectiveFlip: randomness_collective_flip::{Module, Call, Storage},
 		SkillExchange:se::{Module, Call, Storage, Event<T>, Config<T>},
-
+		DeWorkTasks: task_board::{Module, Call, Storage, Event<T>},
 	}
 );
 

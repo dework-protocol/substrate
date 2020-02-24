@@ -1,20 +1,23 @@
-use frame_support::{decl_event, decl_module, decl_storage, StorageMap, StorageValue, ensure};
-use system::ensure_signed;
-use sp_std::prelude::Vec;
-use sp_runtime::{DispatchResult};
-use sp_std::prelude::*;
-use codec::{Decode, Encode};
 use core::u32::MAX as MAX_SUBJECT;
-use sp_runtime::traits::{Hash};
-use log::{info};
+
+use codec::{Decode, Encode};
+use log::info;
+
+use frame_support::{decl_event, decl_module, decl_storage, ensure, StorageMap, StorageValue};
 //use sp_std::prelude::*;
 //use runtime_primitives::traits::{Hash};
 //use nicks;
 use identity;
+use sp_runtime::DispatchResult;
+use sp_runtime::traits::Hash;
+use sp_std::prelude::*;
+use sp_std::prelude::Vec;
+use system::ensure_signed;
 
+use crate::task_board;
 
-pub trait Trait: system::Trait + timestamp::Trait +  balances::Trait /*+ nicks::Trait*/{
-    type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
+pub trait Trait: system::Trait + timestamp::Trait + balances::Trait /*+ nicks::Trait*/ + task_board::Trait {
+	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
 
 //pub type Subject = u32;
@@ -22,26 +25,27 @@ pub trait Trait: system::Trait + timestamp::Trait +  balances::Trait /*+ nicks::
 #[cfg_attr(feature = "std", derive(Debug))]
 #[derive(Encode, Decode, Clone, Default, PartialEq)]
 pub struct Credential<Timestamp, AccountId> {
-   subject: u32,
-   when: Timestamp,
-   by: AccountId
+	subject: u32,
+	when: Timestamp,
+	by: AccountId,
 }
 
 
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "std", derive(Debug))]
 pub struct Task<Hash, AccountId, Timestamp, Balance> {
-    pub hash: Hash,
-    pub issuer: AccountId,
+	pub hash: Hash,
+	pub issuer: AccountId,
 	//pub receivers: Vec<AccountId>,
 	pub description: Vec<u8>,
 	// done condition / overdue treatment
 	//pub judge: Vec<u8>,
 	pub when: Timestamp,
-    pub pay: Balance,
-    pub min_rep: u32,
-    //pub status: TaskStatus<Timestamp>, /* 0: published, 1: claimed*/
-	pub status: u32, /* 0: published, 1: claimed*/
+	pub pay: Balance,
+	pub min_rep: u32,
+	//pub status: TaskStatus<Timestamp>, /* 0: published, 1: claimed*/
+	pub status: u32,
+	/* 0: published, 1: claimed*/
 	pub req_subjects: Vec<u32>,
 
 	//pub kind: TaskKind<Timestamp>,
@@ -130,8 +134,8 @@ pub enum OrderStatus {
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "std", derive(Debug))]
 pub struct IdentityInfo {
-    //pub issuer: AccountId,
-    pub name: Vec<u8>,
+	//pub issuer: AccountId,
+	pub name: Vec<u8>,
 	pub email: Vec<u8>,
 	pub description: Vec<u8>,
 	pub additional: Vec<u8>,
@@ -140,10 +144,10 @@ pub struct IdentityInfo {
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "std", derive(Debug))]
 pub struct SkillSubjectDetails<AccountId> {
-    pub issuer: AccountId,
-    pub name: Vec<u8>,
-    pub tags: Vec<u8>,
-    pub description: Vec<u8>,
+	pub issuer: AccountId,
+	pub name: Vec<u8>,
+	pub tags: Vec<u8>,
+	pub description: Vec<u8>,
 }
 
 
@@ -215,7 +219,6 @@ decl_event!(
 decl_module! {
     pub struct Module<T: Trait> for enum Call where origin: T::Origin {
 		fn deposit_event() = default;
-
         /// Issue a credential to an identity.
         /// Only an issuer can call this function.
         pub fn issue(origin, to: T::AccountId, subject: u32) {
@@ -324,63 +327,61 @@ decl_module! {
 
 
 impl<T: Trait> Module<T> {
-
-    pub fn do_publish_task(origin: T::Origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
-        //generate task.
+	pub fn do_publish_task(origin: T::Origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
+		//generate task.
 		let sender = ensure_signed(origin)?;
-        let nonce = <Nonce>::get();
+		let nonce = <Nonce>::get();
 		let hash = (sender.clone(), nonce).using_encoded(<T as system::Trait>::Hashing::hash);
-        let now = <timestamp::Module<T>>::get();
+		let now = <timestamp::Module<T>>::get();
 
-        let task = Task {
-            hash: hash,
-            issuer: sender.clone(),
-            description: _description,
-            pay: pay,
-            when: now,
-            min_rep: min_rep,
-            status: 0,
+		let task = Task {
+			hash: hash,
+			issuer: sender.clone(),
+			description: _description,
+			pay: pay,
+			when: now,
+			min_rep: min_rep,
+			status: 0,
 			req_subjects: req_subjects,
-        };
+		};
 
 		ensure!(!(<TaskIndex<T>>::exists(hash.clone())), "duplicated task hash.");
 
 		let task_count = <TaskCount>::get();
-        <Tasks<T>>::insert(task_count, task.clone());
+		<Tasks<T>>::insert(task_count, task.clone());
 		<TaskIndex<T>>::insert(hash, task_count);
 		task_count.checked_add(1).ok_or("error to add task")?;
-		<TaskCount>::put(task_count+1);
+		<TaskCount>::put(task_count + 1);
 
 		<Nonce>::mutate(|n| *n += 1);
 
 		Self::deposit_event(RawEvent::TaskPublished(sender));
-        Ok(())
-  }
+		Ok(())
+	}
 
-    pub fn do_claim_task(origin: T::Origin, hash: T::Hash) -> DispatchResult {
-        let sender = ensure_signed(origin)?;
+	pub fn do_claim_task(origin: T::Origin, hash: T::Hash) -> DispatchResult {
+		let sender = ensure_signed(origin)?;
 
 		//check task qualification.
 		let task_index = <TaskIndex<T>>::get(hash);
-        ensure!(<Tasks<T>>::exists(task_index.clone()), "no task found according to the given hash.");
+		ensure!(<Tasks<T>>::exists(task_index.clone()), "no task found according to the given hash.");
 
 		let mut task = <Tasks<T>>::get(task_index);
-        ensure!(task.status == 0, "task not waiting for claim.");
+		ensure!(task.status == 0, "task not waiting for claim.");
 		let req_subjects = &task.req_subjects;
 		for sub in req_subjects {
 			ensure!(<Credentials<T>>::exists((sender.clone(), sub)), "subject not qualified.");
 		}
 
-        //ensure!(<Reputation<T>>::exists(sender.clone()), "no valid user reputation.");
+		//ensure!(<Reputation<T>>::exists(sender.clone()), "no valid user reputation.");
 
 		let min_rep = task.min_rep;
 		let rep = <Reputation<T>>::get(sender.clone());
-        ensure!(rep >= min_rep, "reputation not matched.");
-
+		ensure!(rep >= min_rep, "reputation not matched.");
 
 
 		//modify task status.
-        task.status = 1;
+		task.status = 1;
 		<Tasks<T>>::insert(task_index, task.clone());
 
 		// generate order.
@@ -400,114 +401,14 @@ impl<T: Trait> Module<T> {
 		<OrderIndex<T>>::insert(order_hash, order_count);
 
 		order_count.checked_add(1).ok_or("error to add order")?;
-		<OrderCount>::put(order_count+1);
+		<OrderCount>::put(order_count + 1);
 
 		info!("{:?}", order_hash);
 
 		<Nonce>::mutate(|n| *n += 1);
 		Self::deposit_event(RawEvent::TaskClaimed(sender, hash));
 
-        Ok(())
-    }
+		Ok(())
+	}
 }
 
-
-#[cfg(test)]
-mod tests {
-  use super::*;
-
-  use primitives::{Blake2Hasher, H256};
-  use frame_support::with_externalities;
-  use runtime_primitives::{
-    testing::{Digest, DigestItem, Header},
-    traits::{BlakeTwo256, IdentityLookup},
-    BuildStorage,
-  };
-  use support::{assert_noop, assert_ok, impl_outer_origin};
-
-  impl_outer_origin! {
-    pub enum Origin for Test {}
-  }
-
-  // For testing the module, we construct a mock runtime. This means
-  // first constructing a configuration type (`Test`) which implements each of the
-  // configuration traits of modules we use.
-  #[derive(Clone, Eq, PartialEq)]
-  pub struct Test;
-  impl system::Trait for Test {
-    type Origin = Origin;
-    type Index = u32;
-    type BlockNumber = u32;
-    type Hash = H256;
-    type Hashing = BlakeTwo256;
-    type Digest = Digest;
-    type AccountId = u32;
-    type Lookup = IdentityLookup<u32>;
-    type Header = Header;
-    type Event = ();
-    type Log = DigestItem;
-  }
-  impl timestamp::Trait for Test {
-    type Moment = u32;
-    type OnTimestampSet = ();
-  }
-  impl Trait for Test {
-    type Event = ();
-  }
-  type SkillExchange = Module<Test>;
-
-  // builds the genesis config store and sets mock values
-  fn new_test_ext() -> frame_support::TestExternalities<Blake2Hasher> {
-    let mut t = system::GenesisConfig::<Test>::default()
-      .build_storage()
-      .unwrap()
-      .0;
-    t.extend(
-      GenesisConfig::<Test> {
-        subjects: vec![(1, 1), (2, 2)],
-        subject_count: 3,
-      }
-      .build_storage()
-      .unwrap()
-      .0,
-    );
-    t.into()
-  }
-
-  #[test]
-  fn should_fail_issue() {
-    with_externalities(&mut new_test_ext(), || {
-        assert_noop!(
-            SkillExchange::issue_credential(Origin::signed(1), 3, 2),
-            "Unauthorized.");
-    });
-  }
-
-  #[test]
-  fn should_issue() {
-    with_externalities(&mut new_test_ext(), || {
-        assert_ok!(
-            SkillExchange::issue_credential(Origin::signed(1), 3, 1));
-    });
-  }
-
-  #[test]
-  fn should_revoke() {
-    with_externalities(&mut new_test_ext(), || {
-        assert_ok!(
-            SkillExchange::issue_credential(Origin::signed(1), 3, 1));
-        assert_ok!(
-            SkillExchange::revoke_credential(Origin::signed(1), 3, 1));
-    });
-  }
-
-  #[test]
-  fn should_add_subject() {
-    with_externalities(&mut new_test_ext(), || {
-        assert_ok!(
-            SkillExchange::create_subject(Origin::signed(3)));
-        assert_eq!(
-            SkillExchange::subjects(3), 3);
-    });
-  }
-}
