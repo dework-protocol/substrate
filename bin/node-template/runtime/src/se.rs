@@ -14,7 +14,7 @@ use sp_std::prelude::*;
 use sp_std::prelude::Vec;
 use system::ensure_signed;
 
-use crate::task_board;
+use crate::task_board::{self, Error as BoardError, Task, TaskKind};
 
 pub trait Trait: system::Trait + timestamp::Trait + balances::Trait /*+ nicks::Trait*/ + task_board::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
@@ -28,28 +28,6 @@ pub struct Credential<Timestamp, AccountId> {
 	subject: u32,
 	when: Timestamp,
 	by: AccountId,
-}
-
-
-#[derive(Encode, Decode, Default, Clone, PartialEq)]
-#[cfg_attr(feature = "std", derive(Debug))]
-pub struct Task<Hash, AccountId, Timestamp, Balance> {
-	pub hash: Hash,
-	pub issuer: AccountId,
-	//pub receivers: Vec<AccountId>,
-	pub description: Vec<u8>,
-	// done condition / overdue treatment
-	//pub judge: Vec<u8>,
-	pub when: Timestamp,
-	pub pay: Balance,
-	pub min_rep: u32,
-	//pub status: TaskStatus<Timestamp>, /* 0: published, 1: claimed*/
-	pub status: u32,
-	/* 0: published, 1: claimed*/
-	pub req_subjects: Vec<u32>,
-
-	//pub kind: TaskKind<Timestamp>,
-	//pub history: Vec<TaskKind<Timestamp>>,
 }
 
 #[cfg_attr(feature = "std", derive(Debug))]
@@ -176,14 +154,6 @@ decl_storage! {
         IdentityCount get(identity_count) : u64;
         IdentityIndex: map T::AccountId => u64;
 
-        //// Part 2. Task
-
-        //Task store.
-        //Mapping issuer to task.
-        Tasks get(tasks): map u64 => Task<T::Hash, T::AccountId, T::Moment, T::Balance>;
-		TaskCount get(task_count) : u64;
-		TaskIndex: map T::Hash => u64;
-
         //Order map.
         Orders get(orders): map u64 => Order<T::Hash, T::AccountId>;
         OrderCount get(order_count) : u64;
@@ -246,7 +216,7 @@ decl_module! {
 
         /// Publish a task.
         pub fn publish_task(origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
-          Self::do_publish_task(origin, _description, min_rep, pay, req_subjects)
+          task_board::Module::<T>::do_publish_task(origin, _description, min_rep, pay, req_subjects)
         }
 
         /// Claim a task.
@@ -325,64 +295,19 @@ decl_module! {
     }
 }
 
-
 impl<T: Trait> Module<T> {
-	pub fn do_publish_task(origin: T::Origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
-		//generate task.
-		let sender = ensure_signed(origin)?;
-		let nonce = <Nonce>::get();
-		let hash = (sender.clone(), nonce).using_encoded(<T as system::Trait>::Hashing::hash);
-		let now = <timestamp::Module<T>>::get();
-
-		let task = Task {
-			hash: hash,
-			issuer: sender.clone(),
-			description: _description,
-			pay: pay,
-			when: now,
-			min_rep: min_rep,
-			status: 0,
-			req_subjects: req_subjects,
-		};
-
-		ensure!(!(<TaskIndex<T>>::exists(hash.clone())), "duplicated task hash.");
-
-		let task_count = <TaskCount>::get();
-		<Tasks<T>>::insert(task_count, task.clone());
-		<TaskIndex<T>>::insert(hash, task_count);
-		task_count.checked_add(1).ok_or("error to add task")?;
-		<TaskCount>::put(task_count + 1);
-
-		<Nonce>::mutate(|n| *n += 1);
-
-		Self::deposit_event(RawEvent::TaskPublished(sender));
-		Ok(())
-	}
-
 	pub fn do_claim_task(origin: T::Origin, hash: T::Hash) -> DispatchResult {
 		let sender = ensure_signed(origin)?;
-
-		//check task qualification.
-		let task_index = <TaskIndex<T>>::get(hash);
-		ensure!(<Tasks<T>>::exists(task_index.clone()), "no task found according to the given hash.");
-
-		let mut task = <Tasks<T>>::get(task_index);
-		ensure!(task.status == 0, "task not waiting for claim.");
+		let mut task = task_board::Module::<T>::query_task_by_hash(hash)?;
+		ensure!(task.kind.clone() == TaskKind::Published, "task not waiting for claim.");
 		let req_subjects = &task.req_subjects;
 		for sub in req_subjects {
 			ensure!(<Credentials<T>>::exists((sender.clone(), sub)), "subject not qualified.");
 		}
 
-		//ensure!(<Reputation<T>>::exists(sender.clone()), "no valid user reputation.");
-
-		let min_rep = task.min_rep;
 		let rep = <Reputation<T>>::get(sender.clone());
-		ensure!(rep >= min_rep, "reputation not matched.");
-
-
-		//modify task status.
-		task.status = 1;
-		<Tasks<T>>::insert(task_index, task.clone());
+		ensure!(rep >= task.min_rep, "reputation not matched.");
+		<task_board::Module<T>>::change_task_status(&mut task, TaskKind::InDelivery);
 
 		// generate order.
 		let nonce = <Nonce>::get();
