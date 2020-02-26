@@ -30,36 +30,6 @@ pub struct Credential<Timestamp, AccountId> {
 	by: AccountId,
 }
 
-#[cfg_attr(feature = "std", derive(Debug))]
-#[derive(Encode, Decode, Default, Clone, PartialEq)]
-pub struct Order<Hash, AccountId> {
-	hash: Hash,
-	task_hash: Hash,
-	claimer: AccountId,
-	status: u32,
-}
-
-#[derive(Encode, Decode, Clone, PartialEq)]
-#[cfg_attr(feature = "std", derive(Debug))]
-enum TaskStatus<Timestamp> {
-	Published(Timestamp),
-	InDelivery(Timestamp, Timestamp),
-	Arbitration(Timestamp),
-	// final
-	Overdue,
-	// final
-	Done(Timestamp),
-}
-
-#[derive(Encode, Decode, Clone, PartialEq)]
-#[cfg_attr(feature = "std", derive(Debug))]
-pub enum OrderStatus {
-	WaitReq,
-	InProcess,
-	Arbitration,
-	Final,
-}
-
 //#[derive(Encode, Decode, Default, Clone, PartialEq)]
 //#[cfg_attr(feature = "std", derive(Debug))]
 //pub struct IdentityInfo {
@@ -155,9 +125,9 @@ decl_storage! {
         IdentityIndex: map T::AccountId => u64;
 
         //Order map.
-        Orders get(orders): map u64 => Order<T::Hash, T::AccountId>;
-        OrderCount get(order_count) : u64;
-        OrderIndex: map T::Hash => u64;
+//        Orders get(orders): map u64 => Order<T::Hash, T::AccountId>;
+//        OrderCount get(order_count) : u64;
+//        OrderIndex: map T::Hash => u64;
 
         Nonce: u64;
     }
@@ -220,8 +190,8 @@ decl_module! {
         }
 
         /// Claim a task.
-        pub fn claim_task(origin, task_hash: T::Hash) -> DispatchResult {
-          Self::do_claim_task(origin, task_hash)
+        pub fn claim_task(origin, task_hash: T::Hash, players: Vec<T::AccountId>) -> DispatchResult {
+          Self::do_claim_task(origin, task_hash, players)
         }
 
         /// Apply for a specialist judge
@@ -291,49 +261,35 @@ decl_module! {
 			<IdentityCount>::put(identity_count+1);
 			Self::deposit_event(RawEvent::IdentityCreated(sender.clone()));
 		}
-
     }
 }
 
 impl<T: Trait> Module<T> {
-	pub fn do_claim_task(origin: T::Origin, hash: T::Hash) -> DispatchResult {
-		let sender = ensure_signed(origin)?;
+	pub fn do_claim_task(leader: T::Origin, hash: T::Hash, players: Vec<T::AccountId>) -> DispatchResult {
+		let sender = ensure_signed(leader)?;
 		let mut task = task_board::Module::<T>::query_task_by_hash(hash)?;
 		ensure!(task.kind.clone() == TaskKind::Published, "task not waiting for claim.");
-		let req_subjects = &task.req_subjects;
-		for sub in req_subjects {
-			ensure!(<Credentials<T>>::exists((sender.clone(), sub)), "subject not qualified.");
+		let mut players = players;
+		if !players.contains(&sender) {
+			players.push(sender.clone())
 		}
-
-		let rep = <Reputation<T>>::get(sender.clone());
-		ensure!(rep >= task.min_rep, "reputation not matched.");
+		let req_subjects = &task.req_subjects;
+		for p in &players {
+			ensure!(Self::verify_player(&task, p), "player is invalid.");
+		}
+		task.receivers = players;
 		<task_board::Module<T>>::change_task_status(&mut task, TaskKind::InDelivery);
-
-		// generate order.
-		let nonce = <Nonce>::get();
-		let order_hash = (/*<system::Module<T>>::random_seed(),*/ sender.clone(), nonce)
-			.using_encoded(<T as system::Trait>::Hashing::hash);
-
-		let order = Order {
-			hash: order_hash,
-			task_hash: hash,
-			claimer: sender.clone(),
-			status: 1,
-		};
-		let order_count = <OrderCount>::get();
-
-		<Orders<T>>::insert(order_count, order.clone());
-		<OrderIndex<T>>::insert(order_hash, order_count);
-
-		order_count.checked_add(1).ok_or("error to add order")?;
-		<OrderCount>::put(order_count + 1);
-
-		info!("{:?}", order_hash);
-
-		<Nonce>::mutate(|n| *n += 1);
 		Self::deposit_event(RawEvent::TaskClaimed(sender, hash));
-
 		Ok(())
+	}
+
+	pub fn verify_player(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>, player: &T::AccountId) -> bool {
+		for sub in &task.req_subjects {
+			if !<Credentials<T>>::exists((player, sub)) {
+				return false;
+			}
+		}
+		<Reputation<T>>::get(player) >= task.min_rep
 	}
 }
 
