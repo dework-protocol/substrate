@@ -201,7 +201,7 @@ impl<T: Trait> Module<T> {
 				ensure!( ! bm_to.inner_board.contains( & task.hash), Error::< T >::TaskInWrongBoard);
 
 				Self::save_task(&task)?;
-				//bm_form.inner_board.remove_item(&task.hash);
+				bm_form.inner_board.remove_item(&task.hash);
 				bm_to.inner_board.push(task.hash.clone());
 
 				<BoardManager<T>>::insert(bm_form.task_kind.clone() as u8, bm_form);
