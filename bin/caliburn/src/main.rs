@@ -12,12 +12,12 @@ pub use sc_cli::{VersionInfo, IntoExit, error};
 
 fn main() -> Result<(), cli::error::Error> {
 	let version = VersionInfo {
-		name: "Substrate Node",
+		name: "Caliburn Node",
 		commit: env!("VERGEN_SHA_SHORT"),
 		version: env!("CARGO_PKG_VERSION"),
-		executable_name: "node-template",
-		author: "Anonymous",
-		description: "Template Node",
+		executable_name: "caliburn",
+		author: "Team Caliburn",
+		description: "Decentralized Collaboration Model Towards Web3.",
 		support_url: "support.anonymous.an",
 	};
 

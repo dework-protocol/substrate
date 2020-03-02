@@ -100,8 +100,8 @@ pub mod opaque {
 
 /// This runtime version.
 pub const VERSION: RuntimeVersion = RuntimeVersion {
-	spec_name: create_runtime_str!("node-template"),
-	impl_name: create_runtime_str!("node-template"),
+	spec_name: create_runtime_str!("caliburn"),
+	impl_name: create_runtime_str!("caliburn"),
 	authoring_version: 1,
 	spec_version: 1,
 	impl_version: 1,
@@ -279,7 +279,7 @@ construct_runtime!(
 		// Used for the module template in `./template.rs`
 		TemplateModule: template::{Module, Call, Storage, Event<T>},
 		RandomnessCollectiveFlip: randomness_collective_flip::{Module, Call, Storage},
-		SkillExchange:se::{Module, Call, Storage, Event<T>, Config<T>},
+		Caliburn:se::{Module, Call, Storage, Event<T>, Config<T>},
 		DeWorkTasks: task_board::{Module, Call, Storage, Event<T>},
 		Identity: identity::{Module, Call, Storage, Event<T>},
 	}

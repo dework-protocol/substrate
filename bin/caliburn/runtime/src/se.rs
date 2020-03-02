@@ -52,7 +52,7 @@ pub struct SkillSubjectDetails<AccountId> {
 
 
 decl_storage! {
-    trait Store for Module<T: Trait> as SkillExchange {
+    trait Store for Module<T: Trait> as Caliburn {
 
     	//// Part 1. ID
 

@@ -1,12 +1,12 @@
 [package]
-name = "node-template"
+name = "caliburn"
 version = "2.0.0"
 authors = ["Anonymous"]
 build = "build.rs"
 edition = "2018"
 
 [[bin]]
-name = "node-template"
+name = "caliburn"
 path = "src/main.rs"
 
 [dependencies]
@@ -33,7 +33,7 @@ sp-consensus = { version = "0.8", path = "../../primitives/consensus/common" }
 grandpa = { version = "2.0.0", package = "sc-finality-grandpa", path = "../../client/finality-grandpa" }
 grandpa-primitives = { version = "2.0.0", package = "sp-finality-grandpa", path = "../../primitives/finality-grandpa" }
 sc-client = { version = "2.0.0", path = "../../client/" }
-node-template-runtime = { version = "2.0.0", path = "runtime" }
+caliburn-runtime = { version = "2.0.0", path = "runtime" }
 sp-runtime = { version = "2.0.0", path = "../../primitives/runtime" }
 sc-basic-authority = { path  = "../../client/basic-authorship" }
 

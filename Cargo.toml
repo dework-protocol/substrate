@@ -1,7 +1,7 @@
 [workspace]
 members = [
-	"bin/node-template",
-	"bin/node-template/runtime",
+	"bin/caliburn",
+	"bin/caliburn/runtime",
 	"bin/node/cli",
 	"bin/node/executor",
 	"bin/node/primitives",
