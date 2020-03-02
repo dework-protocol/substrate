@@ -69,6 +69,7 @@ pub type DigestItem = generic::DigestItem<Hash>;
 mod template;
 mod se;
 mod task_board;
+mod identity;
 //mod types;
 //mod task_board;
 //mod board;
@@ -257,6 +258,10 @@ impl task_board::Trait for Runtime {
 	type Event = Event;
 }
 
+impl identity::Trait for Runtime {
+	type Event = Event;
+}
+
 construct_runtime!(
 	pub enum Runtime where
 		Block = Block,
@@ -276,6 +281,7 @@ construct_runtime!(
 		RandomnessCollectiveFlip: randomness_collective_flip::{Module, Call, Storage},
 		SkillExchange:se::{Module, Call, Storage, Event<T>, Config<T>},
 		DeWorkTasks: task_board::{Module, Call, Storage, Event<T>},
+		Identity: identity::{Module, Call, Storage, Event<T>},
 	}
 );
 

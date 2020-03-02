@@ -1,22 +1,23 @@
-use core::u32::MAX as MAX_SUBJECT;
+//use core::u32::MAX as MAX_SUBJECT;
 
 use codec::{Decode, Encode};
-use log::info;
+//use log::info;
 
 use frame_support::{decl_event, decl_module, decl_storage, ensure, StorageMap, StorageValue};
 //use sp_std::prelude::*;
 //use runtime_primitives::traits::{Hash};
 //use nicks;
-use identity;
+//use identity;
 use sp_runtime::DispatchResult;
-use sp_runtime::traits::Hash;
+//use sp_runtime::traits::Hash;
 use sp_std::prelude::*;
 use sp_std::prelude::Vec;
 use system::ensure_signed;
 
 use crate::task_board::{self, Error as BoardError, Task, TaskKind};
+use crate::identity::{self};
 
-pub trait Trait: system::Trait + timestamp::Trait + balances::Trait /*+ nicks::Trait*/ + task_board::Trait {
+pub trait Trait: system::Trait + timestamp::Trait + balances::Trait /*+ nicks::Trait*/ + task_board::Trait + identity::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
 
@@ -29,55 +30,6 @@ pub struct Credential<Timestamp, AccountId> {
 	when: Timestamp,
 	by: AccountId,
 }
-
-//#[derive(Encode, Decode, Default, Clone, PartialEq)]
-//#[cfg_attr(feature = "std", derive(Debug))]
-//pub struct IdentityInfo {
-//	/// Additional fields of the identity that are not catered for with the struct's explicit
-//	/// fields.
-//	pub additional: Vec<u8>,
-//
-//	/// A reasonable display name for the controller of the account. This should be whatever it is
-//	/// that it is typically known as and should not be confusable with other entities, given
-//	/// reasonable context.
-//	///
-//	/// Stored as UTF-8.
-//	pub display: Vec<u8>,
-//
-//	/// The full legal name in the local jurisdiction of the entity. This might be a bit
-//	/// long-winded.
-//	///
-//	/// Stored as UTF-8.
-//	pub legal: Vec<u8>,
-//
-//	/// A representative website held by the controller of the account.
-//	///
-//	/// NOTE: `https://` is automatically prepended.
-//	///
-//	/// Stored as UTF-8.
-//	pub web: Vec<u8>,
-//
-//	/// The Riot/Matrix handle held by the controller of the account.
-//	///
-//	/// Stored as UTF-8.
-//	pub riot: Vec<u8>,
-//
-//	/// The email address of the controller of the account.
-//	///
-//	/// Stored as UTF-8.
-//	pub email: Vec<u8>,
-//
-//	/// The PGP/GPG public key of the controller of the account.
-//	///pub pgp_fingerprint: Option<[u8; 20]>,
-//
-//	/// A graphic image representing the controller of the account. Should be a company,
-//	/// organization or project logo or a headshot in the case of a human.
-//	pub image: Vec<u8>,
-
-//	/// The Twitter identity. The leading `@` character may be elided.
-//	pub email: Vec<u8>,
-//}
-
 
 #[derive(Encode, Decode, Default, Clone, PartialEq)]
 #[cfg_attr(feature = "std", derive(Debug))]
@@ -158,30 +110,13 @@ decl_event!(
 
 decl_module! {
     pub struct Module<T: Trait> for enum Call where origin: T::Origin {
+
 		fn deposit_event() = default;
+
         /// Issue a credential to an identity.
         /// Only an issuer can call this function.
-        pub fn issue(origin, to: T::AccountId, subject: u32) {
-            // Check if origin is an issuer.
-            // Issue the credential - add to storage.
-
-            let sender = ensure_signed(origin)?;
-            let subject_issuer = Self::subjects(subject);
-            //ensure!(sender == <CredManager<T>>::get(), "Unauthorized.");
-            ensure!(subject_issuer == sender, "Unauthorized.");
-
-            //ensure!(<Credentials<T>>::exists((to.clone(), subject)), "Credential already issued to user.");
-
-            let now = <timestamp::Module<T>>::get();
-            let cred = Credential {
-              subject: subject,
-              when: now,
-              by: sender.clone()
-            };
-
-            <Credentials<T>>::insert((to.clone(), subject), cred);
-
-            Self::deposit_event(RawEvent::CredentialIssued(to, subject, sender));
+        pub fn issue(origin, to: T::AccountId, subject: u32) -> DispatchResult{
+			identity::Module::<T>::do_issue(origin, to, subject)
         }
 
         /// Publish a task.
@@ -194,73 +129,32 @@ decl_module! {
           Self::do_claim_task(origin, task_hash, players)
         }
 
-        /// Apply for a specialist judge
-        ///
-
         /// Revoke a credential.
         /// Only an issuer can call this function.
-        pub fn revoke_credential(origin, to: T::AccountId, subject: u32) {
-            // Check if origin is an issuer.
-            // Check if credential is issued.
-            // Change the bool flag of the stored credential tuple to false.
-
-            let sender = ensure_signed(origin)?;
-            let subject_issuer = Self::subjects(subject);
-            ensure!(subject_issuer == sender, "Unauthorized.");
-            ensure!(<Credentials<T>>::exists((to.clone(), subject)), "Credential not issued yet.");
-
-            <Credentials<T>>::remove((to.clone(), subject));
-            Self::deposit_event(RawEvent::CredentialRevoked(to, subject, sender));
+        pub fn revoke_credential(origin, to: T::AccountId, subject: u32) -> DispatchResult {
+			identity::Module::<T>::do_revoke_credential(origin, to, subject)
         }
 
         /// Verify a credential.
-        pub fn verify_credential(origin, holder: T::AccountId, subject: u32) {
-            let _sender = ensure_signed(origin)?;
-
-            // Ensure credential is issued and allowed to be verified.
-            ensure!(<Credentials<T>>::exists((holder.clone(), subject)), "Credential not issued yet.");
+        pub fn verify_credential(origin, holder: T::AccountId, subject: u32) -> DispatchResult {
+			identity::Module::<T>::do_verify_credential(origin, holder, subject)
         }
 
         /// Create a new subject.
-        pub fn create_subject(origin) {
-            let sender = ensure_signed(origin)?;
-            //ensure!(sender == <CredManager<T>>::get(), "Unauthorized.");
-            let subject_count = <SubjectCount>::get();
-
-            //ensure!(subject_count < MAX_SUBJECT, "Max issuance count reached");
-
-            <Subjects<T>>::insert(subject_count, sender.clone());
-
-
-            // Update the subject nonce.
-            <SubjectCount>::put(subject_count + 1);
-
-            // Deposit the event.
-            Self::deposit_event(RawEvent::SubjectCreated(sender, subject_count));
+        pub fn create_subject(origin) -> DispatchResult {
+			identity::Module::<T>::do_create_subject(origin)
         }
+
+        ///register User
+        pub fn register_user(origin, name: Vec<u8>, email: Vec<u8>, description: Vec<u8>, additional: Vec<u8>, kyc_hash: Vec<u8>) -> DispatchResult{
+			identity::Module::<T>::do_register_user(origin, name, email, description, additional, kyc_hash)
+		}
 
         ///update_reputation
         pub fn update_reputation(origin, who: T::AccountId, rep_value: u32) {
             let sender = ensure_signed(origin)?;
         	<Reputation<T>>::insert(who, rep_value);
         }
-
-        ///register User
-        pub fn register_user(origin, name: Vec<u8>, email: Vec<u8>, description: Vec<u8>, additional: Vec<u8>) {
-        	let sender = ensure_signed(origin)?;
-        	let info = IdentityInfo {
-        	    name: name,
-        		email: email,
-        		description: description,
-        		additional: additional,
-        	};
-        	let identity_count = <IdentityCount>::get();
-        	<Identities>::insert(identity_count, info.clone());
-			<IdentityIndex<T>>::insert(sender.clone(), identity_count);
-			identity_count.checked_add(1).ok_or("error to add task")?;
-			<IdentityCount>::put(identity_count+1);
-			Self::deposit_event(RawEvent::IdentityCreated(sender.clone()));
-		}
     }
 }
 
