@@ -1,12 +1,9 @@
 use codec::{Decode, Encode};
-use log::info;
-
 use frame_support::{
 	decl_error,
 	decl_event,
 	decl_module,
 	decl_storage,
-	dispatch::fmt::Debug,
 	ensure, StorageMap,
 	StorageValue,
 	traits::{
@@ -16,13 +13,10 @@ use frame_support::{
 		WithdrawReasons,
 	},
 };
-use sp_core::offchain::Timestamp;
-use sp_runtime::{DispatchResult, RuntimeDebug, traits::{Hash, Zero}};
+use sp_runtime::{DispatchResult, RuntimeDebug, traits::{Hash}};
 use sp_std::prelude::*;
-use sp_std::{result::Result, ops::Div};
+use sp_std::{ops::Div};
 use system::{self, ensure_signed};
-
-use crate::task_board::FundsExchange::IssuerPay;
 
 pub trait Trait: system::Trait + timestamp::Trait + balances::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
@@ -34,7 +28,7 @@ pub struct Task<Hash, AccountId, Timestamp, Balance> {
 	pub issuer: AccountId,
 	pub receivers: Vec<AccountId>,
 	pub description: Vec<u8>,
-	/// done condition / overdue treatment
+	/// done condition / Failure treatment
 	pub judge: Vec<u8>,
 	pub pay: Balance,
 	pub min_rep: u32,
@@ -49,7 +43,7 @@ pub enum TaskKind {
 	InDelivery,
 	Arbitration,
 	/// final status
-	Overdue,
+	Failure,
 	/// final status
 	Done,
 }
@@ -162,7 +156,7 @@ impl<T: Trait> Module<T> {
 		} else {
 			let index = <TaskIndex<T>>::get(task.hash.clone());
 			match task.kind.clone() {
-				TaskKind::Overdue => {
+				TaskKind::Failure => {
 					Self::exchange_of_funds(task, FundsExchange::IssuerBack)?;
 				}
 				TaskKind::Done => {
@@ -235,7 +229,7 @@ impl<T: Trait> Module<T> {
 				<IssuerPayPool<T>>::insert(task.issuer.clone(), T::Balance::from(0_u32));
 			}
 			FundsExchange::IssuerBack => {
-				ensure!(task.kind.clone() == TaskKind::Overdue, Error::<T>::FundsIssuserBackWrongTime);
+				ensure!(task.kind.clone() == TaskKind::Failure, Error::<T>::FundsIssuserBackWrongTime);
 				let pay = <IssuerPayPool<T>>::get(&task.issuer);
 				<balances::Module<T> as Currency<_>>::deposit_into_existing(&task.issuer, pay);
 				<IssuerPayPool<T>>::insert(task.issuer.clone(), T::Balance::from(0_u32));

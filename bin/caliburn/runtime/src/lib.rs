@@ -70,9 +70,7 @@ mod template;
 mod se;
 mod task_board;
 mod identity;
-//mod types;
-//mod task_board;
-//mod board;
+mod reputation;
 
 /// Opaque types. These are used by the CLI to instantiate machinery that don't need to know
 /// the specifics of the runtime. They can then be made to be agnostic over specific formats
