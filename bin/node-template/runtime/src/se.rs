@@ -124,11 +124,6 @@ decl_storage! {
         IdentityCount get(identity_count) : u64;
         IdentityIndex: map T::AccountId => u64;
 
-        //Order map.
-//        Orders get(orders): map u64 => Order<T::Hash, T::AccountId>;
-//        OrderCount get(order_count) : u64;
-//        OrderIndex: map T::Hash => u64;
-
         Nonce: u64;
     }
     //extra_genesis_skip_phantom_data_field;
@@ -216,7 +211,6 @@ decl_module! {
         /// Verify a credential.
         pub fn verify_credential(origin, holder: T::AccountId, subject: u32) {
             let _sender = ensure_signed(origin)?;
-
             // Ensure credential is issued and allowed to be verified.
             ensure!(<Credentials<T>>::exists((holder.clone(), subject)), "Credential not issued yet.");
         }
