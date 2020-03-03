@@ -260,6 +260,10 @@ impl identity::Trait for Runtime {
 	type Event = Event;
 }
 
+impl reputation::Trait for Runtime {
+	type Event = Event;
+}
+
 construct_runtime!(
 	pub enum Runtime where
 		Block = Block,
@@ -280,6 +284,7 @@ construct_runtime!(
 		Caliburn:se::{Module, Call, Storage, Event<T>},
 		DeWorkTasks: task_board::{Module, Call, Storage, Event<T>},
 		Identity: identity::{Module, Call, Storage, Event<T>, Config<T>},
+		ReputationModule: reputation::{Module, Call, Storage, Event<T>},
 	}
 );
 

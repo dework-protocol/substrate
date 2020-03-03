@@ -1,7 +1,6 @@
 //use core::u32::MAX as MAX_SUBJECT;
 
 use codec::{Decode, Encode};
-//use log::info;
 
 use frame_support::{decl_event, decl_module, decl_storage, ensure, StorageMap, StorageValue};
 //use sp_std::prelude::*;
@@ -14,10 +13,13 @@ use sp_std::prelude::*;
 use sp_std::prelude::Vec;
 use system::ensure_signed;
 
-use crate::task_board::{self, Error as BoardError, Task, TaskKind};
 use crate::identity::{self};
+use crate::reputation;
+use crate::task_board::{self, Error as BoardError, Task, TaskKind};
 
-pub trait Trait: system::Trait + timestamp::Trait + balances::Trait /*+ nicks::Trait*/ + task_board::Trait + identity::Trait {
+//use log::info;
+
+pub trait Trait: system::Trait + timestamp::Trait + balances::Trait /*+ nicks::Trait*/ + task_board::Trait + identity::Trait + reputation::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
 
@@ -92,10 +94,6 @@ decl_module! {
 			identity::Module::<T>::do_register_user(origin, name, email, description, additional, kyc_hash)
 		}
 
-        ///update_reputation
-        pub fn update_reputation(origin, who: T::AccountId, rep_value: u32) -> DispatchResult {
-			identity::Module::<T>::do_update_reputation(origin, who, rep_value)
-        }
     }
 }
 
@@ -124,6 +122,6 @@ impl<T: Trait> Module<T> {
 				return false;
 			}
 		}
-		identity::Module::<T>::get_reputation(player) >= task.min_rep
+		reputation::Module::<T>::get_account_reputation_level(player).score >= task.min_rep
 	}
 }

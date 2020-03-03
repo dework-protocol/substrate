@@ -18,7 +18,7 @@ pub trait Trait: system::Trait {
 
 #[derive(Encode, Decode, Clone, RuntimeDebug, Default, Eq, PartialEq)]
 pub struct ReputationLevel {
-	score: u32,
+	pub score: u32,
 }
 
 impl ReputationLevel {

@@ -206,18 +206,8 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
-	///update_reputation
-	pub fn do_update_reputation(origin: T::Origin, who: T::AccountId, rep_value: u32) -> DispatchResult {
-		let sender = ensure_signed(origin)?;
-		<Reputation<T>>::insert(who, rep_value);
-		Ok(())
-	}
-
 	pub fn check_credential(player: &T::AccountId, sub: &u32) -> bool {
 		<Credentials<T>>::exists((player, sub))
 	}
 
-	pub fn get_reputation(player: &T::AccountId) -> u32 {
-		<Reputation<T>>::get(player)
-	}
 }
