@@ -188,7 +188,7 @@ impl<T: Trait> Module<T> {
 	}
 
 	///register User
-	pub fn do_register_user(origin : T::Origin, name: Vec<u8>, email: Vec<u8>, description: Vec<u8>, additional: Vec<u8>, kyc_hash: Vec<u8>) -> DispatchResult {
+	pub fn do_register_user(origin: T::Origin, name: Vec<u8>, email: Vec<u8>, description: Vec<u8>, additional: Vec<u8>, kyc_hash: Vec<u8>) -> DispatchResult {
 		let sender = ensure_signed(origin)?;
 		let mut info = IdentityInfo::default();
 		info.name = name;
@@ -204,5 +204,20 @@ impl<T: Trait> Module<T> {
 		<IdentityCount>::put(identity_count+1);
 		Self::deposit_event(RawEvent::IdentityCreated(sender.clone()));
 		Ok(())
+	}
+
+	///update_reputation
+	pub fn do_update_reputation(origin: T::Origin, who: T::AccountId, rep_value: u32) -> DispatchResult {
+		let sender = ensure_signed(origin)?;
+		<Reputation<T>>::insert(who, rep_value);
+		Ok(())
+	}
+
+	pub fn check_credential(player: &T::AccountId, sub: &u32) -> bool {
+		<Credentials<T>>::exists((player, sub))
+	}
+
+	pub fn get_reputation(player: &T::AccountId) -> u32 {
+		<Reputation<T>>::get(player)
 	}
 }

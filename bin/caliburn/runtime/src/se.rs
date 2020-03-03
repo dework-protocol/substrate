@@ -31,59 +31,9 @@ pub struct Credential<Timestamp, AccountId> {
 	by: AccountId,
 }
 
-#[derive(Encode, Decode, Default, Clone, PartialEq)]
-#[cfg_attr(feature = "std", derive(Debug))]
-pub struct IdentityInfo {
-	//pub issuer: AccountId,
-	pub name: Vec<u8>,
-	pub email: Vec<u8>,
-	pub description: Vec<u8>,
-	pub additional: Vec<u8>,
-}
-
-#[derive(Encode, Decode, Default, Clone, PartialEq)]
-#[cfg_attr(feature = "std", derive(Debug))]
-pub struct SkillSubjectDetails<AccountId> {
-	pub issuer: AccountId,
-	pub name: Vec<u8>,
-	pub tags: Vec<u8>,
-	pub description: Vec<u8>,
-}
-
-
 decl_storage! {
     trait Store for Module<T: Trait> as Caliburn {
-
-    	//// Part 1. ID
-
-        // Global nonce for subject count.
-        SubjectCount get(subject_count) config(): u32;
-		// Issuers can issue credentials to others.
-        // Issuer to Subject mapping.
-        Subjects get(subjects) config(): map u32 => T::AccountId;
-
-        // Credentials store.
-        // Mapping (holder, subject) to Credential.
-        Credentials get(credentials): map (T::AccountId, u32) => Credential<T::Moment, T::AccountId>;
-        //credential manager
-        CredManager get(cred_manager) config(): T::AccountId;
-
-        //Reputation: default is 50.
-        Reputation get(rep) config(): map T::AccountId => u32;
-
-        //User map.
-        Identities get(identities): map u64 => IdentityInfo;
-        IdentityCount get(identity_count) : u64;
-        IdentityIndex: map T::AccountId => u64;
-
-        //Order map.
-//        Orders get(orders): map u64 => Order<T::Hash, T::AccountId>;
-//        OrderCount get(order_count) : u64;
-//        OrderIndex: map T::Hash => u64;
-
-        Nonce: u64;
     }
-    //extra_genesis_skip_phantom_data_field;
 }
 
 decl_event!(
@@ -93,18 +43,10 @@ decl_event!(
         Hash = <T as system::Trait>::Hash,
 
     {
-        // A credential is issued - holder, subj, issuer.
-        CredentialIssued(AccountId, u32, AccountId),
-        // A credential is revoked - holder, subj, issuer.
-        CredentialRevoked(AccountId, u32, AccountId),
-        // A new subject is created.
-        SubjectCreated(AccountId, u32),
         //A new task is published.
         TaskPublished(AccountId),
         //A new task is claimed.
         TaskClaimed(AccountId, Hash),
-        //A new identity is created.
-        IdentityCreated(AccountId),
     }
 );
 
@@ -151,9 +93,8 @@ decl_module! {
 		}
 
         ///update_reputation
-        pub fn update_reputation(origin, who: T::AccountId, rep_value: u32) {
-            let sender = ensure_signed(origin)?;
-        	<Reputation<T>>::insert(who, rep_value);
+        pub fn update_reputation(origin, who: T::AccountId, rep_value: u32) -> DispatchResult {
+			identity::Module::<T>::do_update_reputation(origin, who, rep_value)
         }
     }
 }
@@ -179,11 +120,10 @@ impl<T: Trait> Module<T> {
 
 	pub fn verify_player(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>, player: &T::AccountId) -> bool {
 		for sub in &task.req_subjects {
-			if !<Credentials<T>>::exists((player, sub)) {
+			if !identity::Module::<T>::check_credential(player, sub) {
 				return false;
 			}
 		}
-		<Reputation<T>>::get(player) >= task.min_rep
+		identity::Module::<T>::get_reputation(player) >= task.min_rep
 	}
 }
-

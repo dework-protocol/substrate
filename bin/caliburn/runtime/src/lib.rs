@@ -279,9 +279,9 @@ construct_runtime!(
 		// Used for the module template in `./template.rs`
 		TemplateModule: template::{Module, Call, Storage, Event<T>},
 		RandomnessCollectiveFlip: randomness_collective_flip::{Module, Call, Storage},
-		Caliburn:se::{Module, Call, Storage, Event<T>, Config<T>},
+		Caliburn:se::{Module, Call, Storage, Event<T>},
 		DeWorkTasks: task_board::{Module, Call, Storage, Event<T>},
-		Identity: identity::{Module, Call, Storage, Event<T>},
+		Identity: identity::{Module, Call, Storage, Event<T>, Config<T>},
 	}
 );
 
