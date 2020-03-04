@@ -25,20 +25,38 @@ pub trait Trait: system::Trait + timestamp::Trait + balances::Trait + reputation
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
 
-#[derive(Encode, Decode, Clone, RuntimeDebug, Default, Eq, PartialEq)]
-pub struct Task<Hash, AccountId, Timestamp, Balance> {
-	pub hash: Hash,
-	pub issuer: AccountId,
-	pub receivers: Vec<AccountId>,
+#[derive(Encode, Decode, Clone, RuntimeDebug, Eq, PartialEq)]
+pub struct Task<T:Trait> {
+	pub hash: T::Hash,
+	pub issuer: T::AccountId,
+	pub receivers: Vec<T::AccountId>,
 	pub description: Vec<u8>,
 	/// done condition / Failure treatment
-	pub judge_pay: Balance,
-	pub pay: Balance,
+	pub judge_pay: T::Balance,
+	pub pay: T::Balance,
 	pub min_rep: u32,
 	pub kind: TaskKind,
-	pub history: Vec<(TaskKind, Timestamp)>,
+	pub history: Vec<(TaskKind, T::Moment)>,
 	pub req_subjects: Vec<u32>,
-	pub delivery_certificate: Hash,
+	pub delivery_certificate: T::Hash,
+}
+
+impl<T: Trait> Default for Task<T> {
+	fn default() -> Self {
+		Task {
+			hash: Default::default(),
+			issuer: Default::default(),
+			receivers: Default::default(),
+			description: Default::default(),
+			judge_pay: Default::default(),
+			pay: Default::default(),
+			min_rep: Default::default(),
+			kind: Default::default(),
+			history: Default::default(),
+			req_subjects: Default::default(),
+			delivery_certificate: Default::default(),
+		}
+	}
 }
 
 #[derive(Encode, Decode, Clone, RuntimeDebug, Eq, PartialEq)]
@@ -111,7 +129,7 @@ decl_error! {
 
 decl_storage! {
 	trait Store for Module < T: Trait > as DeWorkTasks {
-		Tasks get(tasks): map u64 => Task< T::Hash, T::AccountId, T::Moment, T::Balance >;
+		Tasks get(tasks): map u64 => Task<T>;
 		TaskCount get(task_count): u64;
 		TaskIndex: map T::Hash => u64;
 
@@ -191,7 +209,7 @@ impl<T: Trait> Module<T> {
 }
 
 impl<T: Trait> Module<T> {
-	pub fn verify_player(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>, player: &T::AccountId) -> bool {
+	pub fn verify_player(task: &Task<T>, player: &T::AccountId) -> bool {
 		for sub in &task.req_subjects {
 			if !identity::Module::<T>::check_credential(player, sub) {
 				return false;
@@ -201,14 +219,14 @@ impl<T: Trait> Module<T> {
 	}
 
 	/// Get task hash
-	pub fn task_hash(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>) -> T::Hash {
+	pub fn task_hash(task: &Task<T>) -> T::Hash {
 		let nonce = <Nonce>::get();
 		<Nonce>::mutate(|n| *n += 1);
 		(task, nonce).using_encoded(<T as system::Trait>::Hashing::hash)
 	}
 
 	/// Create if not exist, modify if exist
-	pub fn save_task(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>) -> DispatchResult {
+	pub fn save_task(task: &Task<T>) -> DispatchResult {
 		if !<TaskIndex<T>>::exists(task.hash.clone()) {
 			ensure!(task.kind.clone() == TaskKind::Published, Error::< T >::TaskKindInvalid);
 			let task_count = <TaskCount>::get();
@@ -235,7 +253,7 @@ impl<T: Trait> Module<T> {
 	}
 
 	/// Task query
-	pub fn query_task_by_hash(hash: T::Hash) -> sp_std::result::Result<Task<T::Hash, T::AccountId, T::Moment, T::Balance>, Error<T>> {
+	pub fn query_task_by_hash(hash: T::Hash) -> sp_std::result::Result<Task<T>, Error<T>> {
 		let index = <TaskIndex<T>>::get(hash);
 		if !<Tasks<T>>::exists(index) {
 			return Err(Error::<T>::TaskNotFoundAtIndex);
@@ -244,7 +262,7 @@ impl<T: Trait> Module<T> {
 	}
 
 	/// Task state flow
-	pub fn change_task_status(task: &mut Task<T::Hash, T::AccountId, T::Moment, T::Balance>, to_task_kind: TaskKind) -> DispatchResult {
+	pub fn change_task_status(task: &mut Task<T>, to_task_kind: TaskKind) -> DispatchResult {
 		task.kind = to_task_kind.clone();
 		task.history.push((task.kind.clone(), <timestamp::Module<T>>::get()));
 
@@ -275,7 +293,7 @@ impl<T: Trait> Module<T> {
 	}
 
 	/// Asset circulation
-	pub fn exchange_of_funds(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>, kind: FundsExchange) -> DispatchResult {
+	pub fn exchange_of_funds(task: &Task<T>, kind: FundsExchange) -> DispatchResult {
 		match kind {
 			FundsExchange::IssuerPay => {
 				Self::issuer_pay(task)?;
@@ -312,7 +330,7 @@ impl<T: Trait> Module<T> {
 
 // pay
 impl<T: Trait> Module<T> {
-	pub fn issuer_pay(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>) -> DispatchResult {
+	pub fn issuer_pay(task: &Task<T>) -> DispatchResult {
 		<balances::Module<T> as Currency<_>>::withdraw(&task.issuer, task.pay, WithdrawReasons::all(), ExistenceRequirement::KeepAlive)?;
 		<IssuerPayPool<T>>::insert(task.issuer.clone(), task.pay.clone());
 		<balances::Module<T> as Currency<_>>::withdraw(&task.issuer, task.judge_pay, WithdrawReasons::all(), ExistenceRequirement::KeepAlive)?;
@@ -320,14 +338,14 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
-	pub fn issuer_back_pay(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>) -> DispatchResult {
+	pub fn issuer_back_pay(task: &Task<T>) -> DispatchResult {
 		let pay = <IssuerPayPool<T>>::get(&task.issuer);
 		<balances::Module<T> as Currency<_>>::deposit_into_existing(&task.issuer, pay)?;
 		<IssuerPayPool<T>>::insert(task.issuer.clone(), T::Balance::from(0_u32));
 		Ok(())
 	}
 
-	pub fn issuer_back_judge(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>) -> DispatchResult {
+	pub fn issuer_back_judge(task: &Task<T>) -> DispatchResult {
 		let judge_pay = <StakingPayPool<T>>::get(&task.issuer);
 		<balances::Module<T> as Currency<_>>::deposit_into_existing(&task.issuer, judge_pay)?;
 		<StakingPayPool<T>>::insert(task.issuer.clone(), T::Balance::from(0_u32));
