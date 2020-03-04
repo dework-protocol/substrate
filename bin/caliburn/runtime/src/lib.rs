@@ -66,7 +66,6 @@ pub type Hash = sp_core::H256;
 pub type DigestItem = generic::DigestItem<Hash>;
 
 /// Used for the module template in `./template.rs`
-mod template;
 mod se;
 mod task_board;
 mod identity;
@@ -241,13 +240,6 @@ impl sudo::Trait for Runtime {
 	type Proposal = Call;
 }
 
-/// Used for the module template in `./template.rs`
-impl template::Trait for Runtime {
-	type Event = Event;
-}
-
-
-/// Used for the module template in `./template.rs`
 impl se::Trait for Runtime {
 	type Event = Event;
 }
@@ -278,8 +270,6 @@ construct_runtime!(
 		Balances: balances,
 		TransactionPayment: transaction_payment::{Module, Storage},
 		Sudo: sudo,
-		// Used for the module template in `./template.rs`
-		TemplateModule: template::{Module, Call, Storage, Event<T>},
 		RandomnessCollectiveFlip: randomness_collective_flip::{Module, Call, Storage},
 		Caliburn:se::{Module, Call, Storage, Event<T>},
 		DeWorkTasks: task_board::{Module, Call, Storage, Event<T>},

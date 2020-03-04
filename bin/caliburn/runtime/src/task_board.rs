@@ -1,4 +1,5 @@
 use codec::{Decode, Encode};
+
 use frame_support::{
 	decl_error,
 	decl_event,
@@ -13,12 +14,14 @@ use frame_support::{
 		WithdrawReasons,
 	},
 };
-use sp_runtime::{DispatchResult, RuntimeDebug, traits::{Hash}};
-use sp_std::prelude::*;
+use sp_runtime::{DispatchResult, RuntimeDebug, traits::Hash};
 use sp_std::{ops::Div};
+use sp_std::prelude::*;
 use system::{self, ensure_signed};
 
-pub trait Trait: system::Trait + timestamp::Trait + balances::Trait {
+use crate::{identity, reputation};
+
+pub trait Trait: system::Trait + timestamp::Trait + balances::Trait + reputation::Trait + identity::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
 
@@ -29,18 +32,20 @@ pub struct Task<Hash, AccountId, Timestamp, Balance> {
 	pub receivers: Vec<AccountId>,
 	pub description: Vec<u8>,
 	/// done condition / Failure treatment
-	pub judge: Vec<u8>,
+	pub judge_pay: Balance,
 	pub pay: Balance,
 	pub min_rep: u32,
 	pub kind: TaskKind,
 	pub history: Vec<(TaskKind, Timestamp)>,
 	pub req_subjects: Vec<u32>,
+	pub delivery_certificate: Hash,
 }
 
 #[derive(Encode, Decode, Clone, RuntimeDebug, Eq, PartialEq)]
 pub enum TaskKind {
 	Published,
 	InDelivery,
+	Deliveryed,
 	Arbitration,
 	/// final status
 	Failure,
@@ -77,6 +82,7 @@ decl_event! {
 		/// params: task-hash, form_kind, to_kind
 		TaskChangeState(Hash, u8, u8, Timestamp),
 		TaskPublish(AccountId, Hash, Timestamp),
+		TaskClaimed(AccountId, Hash),
 	}
 }
 
@@ -85,9 +91,12 @@ decl_error! {
 		TaskDuplicated,
 		TaskCheckAddFail,
 		TaskChangeStatusFail,
+		TaskNotWaitForRecv,
 		TaskNotInBoard,
+		TaskTeamLeaderRepeatSetting,
 		TaskNotFoundAtIndex,
 		TaskNotFoundAtHash,
+		TaskPlayerIsInvalid,
 		TaskInWrongBoard,
 		TaskInvalid,
 		TaskKindInvalid,
@@ -95,6 +104,7 @@ decl_error! {
 		BoardDuplicated,
 		FundsRecvRewardWrongTime,
 		FundsIssuserBackWrongTime,
+		PermissionError,
 	}
 
 }
@@ -108,6 +118,7 @@ decl_storage! {
 		BoardManager get(load_board): map u8 => Board < T::Hash >;
 		Nonce: u64;
 		IssuerPayPool: map T::AccountId => T::Balance;
+		StakingPayPool: map T::AccountId => T::Balance;
 	}
 }
 
@@ -116,19 +127,30 @@ decl_module! {
 		type Error = Error < T >;
 		fn deposit_event() = default;
 
-		pub fn publish_task(origin , desc: Vec < u8 >, min_rep: u32, pay: T::Balance, req_subjects: Vec < u32 > ) {
-			Self::do_publish_task(origin, desc, min_rep, pay, req_subjects) ?;
+		/// Publish tasks on bulletin boards
+		pub fn publish_task(origin , desc: Vec < u8 >, min_rep: u32, pay: T::Balance, judge_pay: T::Balance, req_subjects: Vec < u32 > ) {
+			Self::do_publish_task(origin, desc, min_rep, pay, judge_pay, req_subjects)?;
+		}
+
+		/// Claim accept task
+		pub fn claim_task(origin, hash: T::Hash, players: Vec<T::AccountId>) {
+			Self::do_claim_task(origin, hash, players)?;
+		}
+
+		pub fn claim_deliver_task(origin, hash: T::Hash, delivery_certificate: T::Hash) {
+			Self::do_claim_deliver_task(origin, hash, delivery_certificate)?;
 		}
 	}
 }
 
 impl<T: Trait> Module<T> {
-	pub fn do_publish_task(origin: T::Origin, desc: Vec<u8>, min_rep: u32, pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
+	pub fn do_publish_task(origin: T::Origin, desc: Vec<u8>, min_rep: u32, pay: T::Balance, judge_pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
 		let sender = ensure_signed(origin)?;
 		let mut task = Task::default();
 		task.description = desc;
 		task.min_rep = min_rep;
 		task.pay = pay;
+		task.judge_pay = judge_pay;
 		task.issuer = sender.clone();
 		task.req_subjects = req_subjects.clone();
 		task.hash = Self::task_hash(&task);
@@ -137,12 +159,55 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
+	pub fn do_claim_task(leader: T::Origin, hash: T::Hash, players: Vec<T::AccountId>) -> DispatchResult {
+		let sender = ensure_signed(leader)?;
+		let mut task = Self::query_task_by_hash(hash)?;
+		ensure!(task.kind.clone() == TaskKind::Published, <Error<T>>::TaskNotWaitForRecv);
+		let mut players = players;
+		ensure!(!players.contains(&sender), <Error<T>>::TaskTeamLeaderRepeatSetting);
+		players.push(sender.clone());
+		let req_subjects = &task.req_subjects;
+		for p in &players {
+			ensure!(Self::verify_player(&task, p), <Error<T>>::TaskPlayerIsInvalid);
+		}
+		task.receivers = players;
+		Self::change_task_status(&mut task, TaskKind::InDelivery);
+		Self::deposit_event(RawEvent::TaskClaimed(sender, hash));
+		Ok(())
+	}
+
+	/// Team leader to deliver tasks
+	pub fn do_claim_deliver_task(leader: T::Origin, hash: T::Hash, delivery_certificate: T::Hash) -> DispatchResult {
+		let sender = ensure_signed(leader)?;
+		let mut task = Self::query_task_by_hash(hash)?;
+		ensure!(task.kind.clone() == TaskKind::InDelivery, Error::<T>::TaskKindInvalid);
+		ensure!(task.receivers.len() > 0, <Error<T>>::TaskRecvEmpty);
+		let mut recv = task.receivers.clone();
+		ensure!(recv.pop() == Some(sender), Error::<T>::PermissionError);
+		task.delivery_certificate = delivery_certificate;
+		Self::change_task_status(&mut task, TaskKind::Deliveryed)?;
+		Ok(())
+	}
+}
+
+impl<T: Trait> Module<T> {
+	pub fn verify_player(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>, player: &T::AccountId) -> bool {
+		for sub in &task.req_subjects {
+			if !identity::Module::<T>::check_credential(player, sub) {
+				return false;
+			}
+		}
+		reputation::Module::<T>::get_account_reputation_level(player).score >= task.min_rep
+	}
+
+	/// Get task hash
 	pub fn task_hash(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>) -> T::Hash {
 		let nonce = <Nonce>::get();
 		<Nonce>::mutate(|n| *n += 1);
 		(task, nonce).using_encoded(<T as system::Trait>::Hashing::hash)
 	}
 
+	/// Create if not exist, modify if exist
 	pub fn save_task(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>) -> DispatchResult {
 		if !<TaskIndex<T>>::exists(task.hash.clone()) {
 			ensure!(task.kind.clone() == TaskKind::Published, Error::< T >::TaskKindInvalid);
@@ -169,6 +234,7 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
+	/// Task query
 	pub fn query_task_by_hash(hash: T::Hash) -> sp_std::result::Result<Task<T::Hash, T::AccountId, T::Moment, T::Balance>, Error<T>> {
 		let index = <TaskIndex<T>>::get(hash);
 		if !<Tasks<T>>::exists(index) {
@@ -177,6 +243,7 @@ impl<T: Trait> Module<T> {
 		Ok(<Tasks<T>>::get(index))
 	}
 
+	/// Task state flow
 	pub fn change_task_status(task: &mut Task<T::Hash, T::AccountId, T::Moment, T::Balance>, to_task_kind: TaskKind) -> DispatchResult {
 		task.kind = to_task_kind.clone();
 		task.history.push((task.kind.clone(), <timestamp::Module<T>>::get()));
@@ -207,11 +274,11 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
+	/// Asset circulation
 	pub fn exchange_of_funds(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>, kind: FundsExchange) -> DispatchResult {
 		match kind {
 			FundsExchange::IssuerPay => {
-				<balances::Module<T> as Currency<_>>::withdraw(&task.issuer, task.pay, WithdrawReasons::all(), ExistenceRequirement::KeepAlive)?;
-				<IssuerPayPool<T>>::insert(task.issuer.clone(), task.pay.clone());
+				Self::issuer_pay(task)?;
 			}
 			FundsExchange::RecvReward => {
 				ensure!(task.kind.clone() == TaskKind::Done, Error::<T>::FundsRecvRewardWrongTime);
@@ -230,12 +297,40 @@ impl<T: Trait> Module<T> {
 			}
 			FundsExchange::IssuerBack => {
 				ensure!(task.kind.clone() == TaskKind::Failure, Error::<T>::FundsIssuserBackWrongTime);
-				let pay = <IssuerPayPool<T>>::get(&task.issuer);
-				<balances::Module<T> as Currency<_>>::deposit_into_existing(&task.issuer, pay);
-				<IssuerPayPool<T>>::insert(task.issuer.clone(), T::Balance::from(0_u32));
+				Self::issuer_back_pay(task)?;
+				if task.history.iter().filter(|t| {
+					t.0.clone() == TaskKind::Arbitration
+				}).count() == 0 {
+					Self::issuer_back_judge(task)?;
+				}
 			}
 			_ => {}
 		}
+		Ok(())
+	}
+}
+
+// pay
+impl<T: Trait> Module<T> {
+	pub fn issuer_pay(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>) -> DispatchResult {
+		<balances::Module<T> as Currency<_>>::withdraw(&task.issuer, task.pay, WithdrawReasons::all(), ExistenceRequirement::KeepAlive)?;
+		<IssuerPayPool<T>>::insert(task.issuer.clone(), task.pay.clone());
+		<balances::Module<T> as Currency<_>>::withdraw(&task.issuer, task.judge_pay, WithdrawReasons::all(), ExistenceRequirement::KeepAlive)?;
+		<StakingPayPool<T>>::insert(task.issuer.clone(), task.judge_pay.clone());
+		Ok(())
+	}
+
+	pub fn issuer_back_pay(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>) -> DispatchResult {
+		let pay = <IssuerPayPool<T>>::get(&task.issuer);
+		<balances::Module<T> as Currency<_>>::deposit_into_existing(&task.issuer, pay)?;
+		<IssuerPayPool<T>>::insert(task.issuer.clone(), T::Balance::from(0_u32));
+		Ok(())
+	}
+
+	pub fn issuer_back_judge(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>) -> DispatchResult {
+		let judge_pay = <StakingPayPool<T>>::get(&task.issuer);
+		<balances::Module<T> as Currency<_>>::deposit_into_existing(&task.issuer, judge_pay)?;
+		<StakingPayPool<T>>::insert(task.issuer.clone(), T::Balance::from(0_u32));
 		Ok(())
 	}
 }

@@ -14,12 +14,11 @@ use sp_std::prelude::Vec;
 use system::ensure_signed;
 
 use crate::identity::{self};
-use crate::reputation;
 use crate::task_board::{self, Error as BoardError, Task, TaskKind};
 
 //use log::info;
 
-pub trait Trait: system::Trait + timestamp::Trait + balances::Trait /*+ nicks::Trait*/ + task_board::Trait + identity::Trait + reputation::Trait {
+pub trait Trait: system::Trait + timestamp::Trait + balances::Trait /*+ nicks::Trait*/ + task_board::Trait + identity::Trait {
 	type Event: From<Event<Self>> + Into<<Self as system::Trait>::Event>;
 }
 
@@ -64,13 +63,13 @@ decl_module! {
         }
 
         /// Publish a task.
-        pub fn publish_task(origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
-          task_board::Module::<T>::do_publish_task(origin, _description, min_rep, pay, req_subjects)
+        pub fn publish_task(origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance, judge_pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
+          task_board::Module::<T>::do_publish_task(origin, _description, min_rep, pay, judge_pay, req_subjects)
         }
 
         /// Claim a task.
         pub fn claim_task(origin, task_hash: T::Hash, players: Vec<T::AccountId>) -> DispatchResult {
-          Self::do_claim_task(origin, task_hash, players)
+          <task_board::Module<T>>::claim_task(origin, task_hash, players)
         }
 
         /// Revoke a credential.
@@ -97,31 +96,3 @@ decl_module! {
     }
 }
 
-impl<T: Trait> Module<T> {
-	pub fn do_claim_task(leader: T::Origin, hash: T::Hash, players: Vec<T::AccountId>) -> DispatchResult {
-		let sender = ensure_signed(leader)?;
-		let mut task = task_board::Module::<T>::query_task_by_hash(hash)?;
-		ensure!(task.kind.clone() == TaskKind::Published, "task not waiting for claim.");
-		let mut players = players;
-		if !players.contains(&sender) {
-			players.push(sender.clone())
-		}
-		let req_subjects = &task.req_subjects;
-		for p in &players {
-			ensure!(Self::verify_player(&task, p), "player is invalid.");
-		}
-		task.receivers = players;
-		<task_board::Module<T>>::change_task_status(&mut task, TaskKind::InDelivery);
-		Self::deposit_event(RawEvent::TaskClaimed(sender, hash));
-		Ok(())
-	}
-
-	pub fn verify_player(task: &Task<T::Hash, T::AccountId, T::Moment, T::Balance>, player: &T::AccountId) -> bool {
-		for sub in &task.req_subjects {
-			if !identity::Module::<T>::check_credential(player, sub) {
-				return false;
-			}
-		}
-		reputation::Module::<T>::get_account_reputation_level(player).score >= task.min_rep
-	}
-}
