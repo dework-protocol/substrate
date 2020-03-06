@@ -27,18 +27,22 @@ pub trait Trait: system::Trait + balances::Trait + reputation::Trait {
 
 #[derive(Encode, Decode, Clone, RuntimeDebug, Eq, PartialEq)]
 pub struct Judgement<T: Trait> {
+	pub sender: T::AccountId,
 	pub judges: Vec<(T::AccountId, ResultKind)>,
 	pub kind: JudgeKind,
 	pub threshold: u32,
+	pub pool_size: u32,
 	pub pledge_limit: T::Balance,
 }
 
-impl<T : Trait> Default for Judgement<T> {
+impl<T: Trait> Default for Judgement<T> {
 	fn default() -> Self {
 		Judgement {
+			sender: Default::default(),
 			judges: Default::default(),
-			kind: JudgeKind::Begin,
+			kind: JudgeKind::Processing,
 			threshold: Default::default(),
+			pool_size: Default::default(),
 			pledge_limit: Default::default(),
 		}
 	}
@@ -53,16 +57,32 @@ impl<T: Trait> Judgement<T> {
 		}
 		true
 	}
+
 	pub fn add_judge(&mut self, judge: T::AccountId, result: ResultKind) -> DispatchResult {
 		ensure!(self.verify_repeat(judge.clone()), Error::<T>::JudgeRepeat);
 		self.judges.push((judge, result));
+		if (self.judges.len() as u32) == self.pool_size {
+			self.kind = JudgeKind::Done;
+		}
 		Ok(())
+	}
+
+	pub fn result(&self) -> ResultKind {
+		let mut count = (0, 0);
+		self.judges.iter().map(|judge| {
+			match judge.1 {
+				ResultKind::ResultTrue => { count.0 += 1 }
+				ResultKind::ResultFalse => { count.1 += 1 }
+			}
+		}).count();
+		if count.0 > count.1 { ResultKind::ResultTrue } else { ResultKind::ResultFalse }
 	}
 }
 
 #[derive(Encode, Decode, Copy, Clone, RuntimeDebug, Eq, PartialEq)]
 pub enum JudgeKind {
-	Begin,
+	UnCreated,
+	Processing,
 	Done,
 }
 
@@ -88,7 +108,8 @@ decl_storage! {
 		Judges: map T::Hash => Judgement<T>;
 		JudgeSize get(judge_size) config(): u32;
 		Threshold get(threshold) config(): u32;
-		PledgePool: map T::AccountId => T::Balance;
+		PledgePool: map (T::AccountId, T::Hash) => T::Balance;
+		JudgeResult: map T::Hash => u8;
 	}
 }
 
@@ -98,8 +119,10 @@ decl_error! {
 		JudgeKindInvalid,
 		JudgeVerifyFaild,
 		JudgementNotFound,
+		JudgeAlreadyDone,
 		JudgeSizeFull,
 		JudgeRepeat,
+		JudgeProcessing,
 	}
 }
 
@@ -110,7 +133,11 @@ decl_module! {
 
 
 		pub fn exec_judgement(origin, hash: T::Hash, result: u32) {
-			Self::do_exec_judgement(origin, hash, result);
+			Self::do_exec_judgement(origin, hash, result)?;
+		}
+
+		pub fn verify_judgement_Done(origin, hash: T::Hash) {
+			Self::do_view_judgement_result(origin, hash)?;
 		}
 	}
 }
@@ -120,33 +147,66 @@ impl<T: Trait> Module<T> {
 	pub fn do_exec_judgement(origin: T::Origin, hash: T::Hash, result: u32) -> DispatchResult {
 		let sender = ensure_signed(origin)?;
 		ensure!(Self::verify_judge_for_hash(sender.clone(), &hash), Error::<T>::JudgeVerifyFaild);
-		let judgement:Judgement<T> = <Judges<T>>::get(&hash);
+		let judgement: Judgement<T> = <Judges<T>>::get(&hash);
 		<balances::Module<T> as Currency<_>>::withdraw(&sender, judgement.pledge_limit, WithdrawReasons::all(), ExistenceRequirement::KeepAlive)?;
-		<PledgePool<T>>::insert(sender.clone(), judgement.pledge_limit.clone());
+		<PledgePool<T>>::insert((sender.clone(), hash.clone()), judgement.pledge_limit.clone());
 		Self::add_judge(sender.clone(), &hash, result)?;
 		Ok(())
+	}
+
+	pub fn do_view_judgement_result(origin: T::Origin, hash: T::Hash) -> DispatchResult {
+		let _ = ensure_signed(origin)?;
+		match Self::view_progress(hash.clone()) {
+			JudgeKind::Done => {
+				let result = Self::view_result(hash.clone())?;
+				<JudgeResult<T>>::insert(hash, result as u8);
+				Ok(())
+			}
+			_ => {
+				Err(Error::<T>::JudgeProcessing.into())
+			}
+		}
 	}
 }
 
 impl<T: Trait> Module<T> {
 	/// The application layer processes the task corresponding to the hash,
 	/// obtains the credentials of the success of the task, and makes a decision
-	pub fn begin_judge(hash: T::Hash, pledge_limit: T::Balance) -> DispatchResult {
+	pub fn begin_judgement(hash: T::Hash, sender: T::AccountId, pledge_limit: T::Balance) -> DispatchResult {
 		let mut judge = Judgement::default();
 		judge.threshold = Self::threshold();
+		judge.pool_size = Self::judge_size();
 		judge.pledge_limit = pledge_limit;
+		judge.sender = sender;
 		Self::save_judgement(&hash, &judge)?;
 		Ok(())
+	}
+
+	pub fn view_progress(hash: T::Hash) -> JudgeKind {
+		if !<Judges<T>>::exists(hash) {
+			return JudgeKind::UnCreated;
+		}
+		let judgement: Judgement<T> = <Judges<T>>::get(hash.clone());
+		judgement.kind.clone()
+	}
+
+	pub fn view_result(hash: T::Hash) -> Result<ResultKind, DispatchError> {
+		if !<Judges<T>>::exists(hash) {
+			return Err(Error::<T>::JudgementNotFound.into());
+		}
+		let judgement = <Judges<T>>::get(hash.clone());
+		Ok(judgement.result())
 	}
 }
 
 impl<T: Trait> Module<T> {
 	pub fn save_judgement(hash: &T::Hash, judgement: &Judgement<T>) -> DispatchResult {
 		if !<Judges<T>>::exists(hash) {
-			ensure!(judgement.kind == JudgeKind::Begin, Error::<T>::JudgeKindInvalid);
+			ensure!(judgement.kind == JudgeKind::Processing, Error::<T>::JudgeKindInvalid);
 		} else {
 			let _judge = <Judges<T>>::get(hash);
 			ensure!((_judge.kind as u8) <= (judgement.kind as u8), Error::<T>::JudgeKindInvalid);
+			ensure!(_judge.kind != JudgeKind::Done, Error::<T>::JudgeAlreadyDone);
 		}
 		<Judges<T>>::insert(hash, judgement);
 		Ok(())
