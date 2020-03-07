@@ -64,7 +64,7 @@ decl_module! {
 
         /// Publish a task.
         pub fn publish_task(origin, _description: Vec<u8>, min_rep: u32, pay: T::Balance, judge_pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
-          task_board::Module::<T>::do_publish_task(origin, _description, min_rep, pay, judge_pay, req_subjects)
+          task_board::Module::<T>::publish_task(origin, _description, min_rep, pay, judge_pay, req_subjects)
         }
 
         /// Claim a task.

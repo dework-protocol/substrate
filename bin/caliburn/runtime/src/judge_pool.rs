@@ -17,7 +17,7 @@ use frame_support::{
 use sp_runtime::{DispatchError, DispatchResult, RuntimeDebug, traits::{Hash, Zero}};
 use sp_std::{self, prelude::*};
 use sp_std::result::Result;
-use system::{self, ensure_signed};
+use system::{self, ensure_root, ensure_signed};
 
 use crate::reputation;
 
@@ -131,11 +131,24 @@ decl_module! {
 		type Error = Error < T >;
 		fn deposit_event() = default;
 
+		/// Changing judge_size through governance
+		fn change_judge_size(origin, size: u32) {
+			let root = ensure_root(origin)?;
+			<JudgeSize>::put(size);
+		}
 
+		/// Changing threshold through governance
+		fn change_judge_threshold(origin, threshold: u32) {
+			let root = ensure_root(origin)?;
+			<Threshold>::put(threshold);
+		}
+
+		/// Execute judge task
 		pub fn exec_judgement(origin, hash: T::Hash, result: u32) {
 			Self::do_exec_judgement(origin, hash, result)?;
 		}
 
+		/// Verify that the task has been completed
 		pub fn verify_judgement_Done(origin, hash: T::Hash) {
 			Self::do_view_judgement_result(origin, hash)?;
 		}
@@ -154,13 +167,15 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
-	pub fn do_view_judgement_result(origin: T::Origin, hash: T::Hash) -> DispatchResult {
+	pub fn do_view_judgement_result(origin: T::Origin, hash: T::Hash) -> Result<ResultKind, DispatchError> {
 		let _ = ensure_signed(origin)?;
 		match Self::view_progress(hash.clone()) {
 			JudgeKind::Done => {
 				let result = Self::view_result(hash.clone())?;
-				<JudgeResult<T>>::insert(hash, result as u8);
-				Ok(())
+				if !<JudgeResult<T>>::exists(hash.clone()) {
+					<JudgeResult<T>>::insert(hash.clone(), result as u8);
+				}
+				Ok(Self::handler_result(<JudgeResult<T>>::get(hash.clone()) as u32))
 			}
 			_ => {
 				Err(Error::<T>::JudgeProcessing.into())
@@ -182,6 +197,7 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
+	/// View judge task progress
 	pub fn view_progress(hash: T::Hash) -> JudgeKind {
 		if !<Judges<T>>::exists(hash) {
 			return JudgeKind::UnCreated;
@@ -190,6 +206,7 @@ impl<T: Trait> Module<T> {
 		judgement.kind.clone()
 	}
 
+	/// View results of judge's current ruling
 	pub fn view_result(hash: T::Hash) -> Result<ResultKind, DispatchError> {
 		if !<Judges<T>>::exists(hash) {
 			return Err(Error::<T>::JudgementNotFound.into());
@@ -200,6 +217,7 @@ impl<T: Trait> Module<T> {
 }
 
 impl<T: Trait> Module<T> {
+	/// Store judge tasks
 	pub fn save_judgement(hash: &T::Hash, judgement: &Judgement<T>) -> DispatchResult {
 		if !<Judges<T>>::exists(hash) {
 			ensure!(judgement.kind == JudgeKind::Processing, Error::<T>::JudgeKindInvalid);
@@ -212,6 +230,7 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
+	/// Increase judge executive
 	pub fn add_judge(sender: T::AccountId, hash: &T::Hash, result: u32) -> DispatchResult {
 		ensure!(<Judges<T>>::exists(hash), Error::<T>::JudgementNotFound);
 		let mut judgement: Judgement<T> = <Judges<T>>::get(hash);
@@ -225,6 +244,7 @@ impl<T: Trait> Module<T> {
 		if result == 0 { ResultKind::ResultFalse } else { ResultKind::ResultTrue }
 	}
 
+	/// Validate judge based on hash value
 	pub fn verify_judge_for_hash(judge: T::AccountId, hash: &T::Hash) -> bool {
 		let rep = <reputation::Module<T>>::get_account_reputation_level(&judge);
 		if !<Judges<T>>::exists(hash) {

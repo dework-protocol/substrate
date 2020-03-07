@@ -64,7 +64,7 @@ decl_module! {
 }
 
 impl<T: Trait> Module<T> {
-
+	/// View the credit score of the current account
 	pub fn get_account_reputation_level(account_id: &T::AccountId) -> ReputationLevel {
 		if !<Reputation<T>>::exists(account_id) {
 			let rep = ReputationLevel {
@@ -77,6 +77,7 @@ impl<T: Trait> Module<T> {
 		}
 	}
 
+	/// Change of reputation according to different status
 	pub fn reputation_change(account_id: T::AccountId, op: ReputationOp) -> DispatchResult {
 		let mut rep = Self::get_account_reputation_level(&account_id);
 		match op {

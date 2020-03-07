@@ -121,6 +121,7 @@ decl_error! {
 		TaskKindInvalid,
 		TaskRecvEmpty,
 		TaskParticipantInvalid,
+		TaskProcessing,
 		BoardDuplicated,
 		FundsRecvRewardWrongTime,
 		FundsIssuserBackWrongTime,
@@ -157,17 +158,25 @@ decl_module! {
 			Self::do_claim_task(origin, hash, players)?;
 		}
 
+		/// Deliver tasks when they are completed
 		pub fn claim_deliver_task(origin, hash: T::Hash, delivery_certificate: T::Hash) {
 			Self::do_claim_deliver_task(origin, hash, delivery_certificate)?;
 		}
 
+		/// Apply for arbitration
 		pub fn request_for_judge(origin, hash: T::Hash) {
 			Self::do_request_for_judge(origin, hash)?;
+		}
+
+		/// Push the mission to its final state
+		pub fn task_to_final(origin, hash: T::Hash) {
+			Self::do_task_to_final(origin, hash)?;
 		}
 	}
 }
 
 impl<T: Trait> Module<T> {
+	/// Publish tasks on bulletin boards
 	pub fn do_publish_task(origin: T::Origin, desc: Vec<u8>, min_rep: u32, pay: T::Balance, judge_pay: T::Balance, req_subjects: Vec<u32>) -> DispatchResult {
 		let sender = ensure_signed(origin)?;
 		let mut task = Task::default();
@@ -183,6 +192,7 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
+	/// Claim accept task
 	pub fn do_claim_task(leader: T::Origin, hash: T::Hash, players: Vec<T::AccountId>) -> DispatchResult {
 		let sender = ensure_signed(leader)?;
 		let mut task = Self::query_task_by_hash(hash)?;
@@ -213,12 +223,45 @@ impl<T: Trait> Module<T> {
 		Ok(())
 	}
 
+	/// Apply for arbitration
 	pub fn do_request_for_judge(origin: T::Origin, hash: T::Hash) -> DispatchResult {
 		let sender = ensure_signed(origin)?;
-		let task: Task<T> = Self::query_task_by_hash(hash.clone())?;
+		let mut task: Task<T> = Self::query_task_by_hash(hash.clone())?;
 		ensure!(Self::is_task_participant(&task, sender.clone()), Error::<T>::TaskParticipantInvalid);
+		ensure!(task.kind.clone() == TaskKind::Deliveryed, Error::<T>::TaskKindInvalid);
 		<judge_pool::Module<T>>::begin_judgement(hash.clone(), sender.clone(), task.judge_pay)?;
+		Self::change_task_status(&mut task, TaskKind::Arbitration);
 		Ok(())
+	}
+
+	/// Push the mission to its final state
+	pub fn do_task_to_final(origin: T::Origin, hash: T::Hash) -> DispatchResult {
+		let sender = ensure_signed(origin.clone())?;
+		let mut task: Task<T> = Self::query_task_by_hash(hash.clone())?;
+		ensure!(Self::is_task_participant(&task, sender.clone()), Error::<T>::TaskParticipantInvalid);
+		match task.kind.clone() {
+			TaskKind::Arbitration => {
+				let result = judge_pool::Module::<T>::do_view_judgement_result(origin, hash.clone())?;
+				match result {
+					judge_pool::ResultKind::ResultTrue => {
+						Self::change_task_status(&mut task, TaskKind::Done)?;
+					}
+					judge_pool::ResultKind::ResultFalse => {
+						Self::change_task_status(&mut task, TaskKind::Failure)?;
+					}
+				}
+				Ok(())
+			}
+			TaskKind::Failure => {
+				Ok(())
+			}
+			TaskKind::Done => {
+				Ok(())
+			}
+			_ => {
+				Err(Error::<T>::TaskProcessing.into())
+			}
+		}
 	}
 }
 
